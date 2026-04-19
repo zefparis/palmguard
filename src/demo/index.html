@@ -1532,7 +1532,12 @@ function combinedSimilarity(a, b) {
     console.error("[PalmGuard] Loading MediaPipe tasks-vision via dynamic import…");
     let HandLandmarker, FilesetResolver;
     try {
-      const mpv = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/vision_bundle.js");
+      let mpv;
+      try {
+        mpv = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.js");
+      } catch (_) {
+        mpv = await import("https://unpkg.com/@mediapipe/tasks-vision@0.10.14/vision_bundle.js");
+      }
       HandLandmarker  = mpv.HandLandmarker;
       FilesetResolver = mpv.FilesetResolver;
     } catch (importErr) {
@@ -1555,7 +1560,7 @@ function combinedSimilarity(a, b) {
     console.error("[PalmGuard] tasks-vision loaded, creating HandLandmarker…");
     try {
       const vision = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm"
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
       );
       const handLandmarker = await HandLandmarker.createFromOptions(vision, {
         baseOptions: {
