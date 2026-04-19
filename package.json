@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite src/demo",
     "build": "tsc --noEmit && vite build",
+    "build:demo": "vite build",
     "build:api": "tsc -p tsconfig.api.json",
     "test": "vitest run",
     "test:watch": "vitest",

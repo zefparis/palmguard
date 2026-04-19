@@ -1,11 +1,7 @@
 {
   "version": 2,
-  "builds": [
-    { "src": "src/demo/index.html", "use": "@vercel/static" }
-  ],
-  "routes": [
-    { "src": "/(.*)", "dest": "src/demo/index.html" }
-  ],
+  "buildCommand": "npm run build:demo",
+  "outputDirectory": "dist/demo",
   "headers": [
     {
       "source": "/(.*)",
