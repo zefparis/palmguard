@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: palmguard
+    runtime: node
+    region: frankfurt  # same region as hcs-u7-backend for lowest latency
+    plan: standard
+    buildCommand: npm ci && npm run build:api
+    startCommand: node dist/api/start.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4010
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: HCS_TOKEN_SECRET
+        sync: false
+      - key: RATE_LIMITER_MODE
+        value: supabase
+    healthCheckPath: /api/palm/health

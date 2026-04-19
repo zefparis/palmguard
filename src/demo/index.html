@@ -1,0 +1,790 @@
+<!-- PALMGUARD DEMO v5 — Phase 5 HCS-U7 2-Factor Integration -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PalmGuard v1.0 — HCS-U7 2-Factor Biometric Auth</title>
+
+  <!-- MediaPipe Hands (CDN, WASM) — must load before module scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #070b11;
+      --surface: #0f1420;
+      --card: #141927;
+      --border: #1e2539;
+      --accent: #6366f1;
+      --accent2: #8b5cf6;
+      --cyan: #06b6d4;
+      --green: #10b981;
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --mono: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2rem 1rem;
+      gap: 1.5rem;
+    }
+
+    header { text-align: center; }
+    header h1 {
+      font-size: 1.8rem; font-weight: 800;
+      background: linear-gradient(135deg, var(--accent), var(--cyan));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+      letter-spacing: -0.02em;
+    }
+    header p { color: var(--muted); font-size: 0.875rem; margin-top: 0.4rem; }
+    .badges { margin-top: 0.6rem; display: flex; flex-wrap: wrap; justify-content: center; gap: 0.4rem; }
+    .badge {
+      background: var(--card); border: 1px solid var(--border); border-radius: 999px;
+      padding: 0.18rem 0.65rem; font-size: 0.7rem; color: var(--muted);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      width: 100%;
+      max-width: 1080px;
+    }
+    @media (max-width: 720px) { .layout { grid-template-columns: 1fr; } }
+
+    .card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 12px; padding: 1.25rem;
+    }
+    .card-title {
+      font-size: 0.7rem; font-weight: 700; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--muted); margin-bottom: 0.75rem;
+    }
+
+    /* ── Webcam panel ── */
+    .cam-wrap {
+      position: relative; background: #000; border-radius: 8px;
+      overflow: hidden; aspect-ratio: 4/3;
+    }
+    #webcam {
+      width: 100%; height: 100%; object-fit: cover;
+      transform: scaleX(-1); display: block;
+    }
+    #overlay {
+      position: absolute; inset: 0; pointer-events: none;
+      transform: scaleX(-1);
+    }
+    .cam-badge {
+      position: absolute; top: 8px; left: 8px;
+      background: rgba(0,0,0,0.7); border: 1px solid var(--border);
+      border-radius: 6px; padding: 0.2rem 0.5rem;
+      font-size: 0.65rem; color: var(--cyan); font-family: var(--mono);
+    }
+    .cam-badge.recording { color: var(--red); }
+
+    /* ── Skeleton canvas ── */
+    #skeleton-canvas {
+      width: 100%; aspect-ratio: 1; border-radius: 8px;
+      background: #000; display: block; image-rendering: pixelated;
+    }
+
+    /* ── D-value bars ── */
+    .line-bars { display: flex; flex-direction: column; gap: 0.5rem; }
+    .line-row { display: flex; align-items: center; gap: 0.6rem; }
+    .line-label { font-size: 0.7rem; color: var(--muted); width: 40px; flex-shrink: 0; font-family: var(--mono); }
+    .line-bar-bg { flex: 1; background: var(--surface); border-radius: 99px; height: 6px; overflow: hidden; }
+    .line-bar-fill { height: 100%; background: var(--accent); border-radius: 99px; width: 0; transition: width 0.4s; }
+    .line-val { font-size: 0.7rem; font-family: var(--mono); color: var(--text); width: 38px; text-align: right; }
+
+    /* ── TDA scatter plot ── */
+    #tda-canvas {
+      width: 100%; aspect-ratio: 1; border-radius: 8px;
+      background: var(--surface); display: block;
+    }
+
+    /* ── Controls ── */
+    .controls { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+    button {
+      flex: 1; min-width: 100px; padding: 0.6rem 1rem;
+      border-radius: 8px; border: none; font-size: 0.85rem; font-weight: 700;
+      cursor: pointer; transition: opacity 0.15s, transform 0.1s;
+    }
+    button:active { transform: scale(0.97); }
+    button:disabled { opacity: 0.35; cursor: not-allowed; }
+    .btn-primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #fff; }
+    .btn-cyan    { background: linear-gradient(135deg, var(--cyan), #0ea5e9); color: #fff; }
+    .btn-ghost   { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+
+    /* ── Metrics ── */
+    .metrics-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.5rem; }
+    .metric { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.75rem; }
+    .metric-label { font-size: 0.62rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+    .metric-value { font-size: 1rem; font-weight: 800; font-family: var(--mono); color: var(--text); margin-top: 0.15rem; }
+    .metric-value.green  { color: var(--green); }
+    .metric-value.red    { color: var(--red); }
+    .metric-value.cyan   { color: var(--cyan); }
+    .metric-value.amber  { color: var(--amber); }
+
+    /* ── Status / result ── */
+    .status-row { display: flex; align-items: center; gap: 0.5rem; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+    .dot.live   { background: var(--green); animation: blink 1.4s infinite; }
+    .dot.error  { background: var(--red); }
+    .dot.processing { background: var(--amber); animation: blink 0.6s infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    #status-text { font-size: 0.8rem; color: var(--muted); }
+
+    .result-panel {
+      border-radius: 10px; padding: 1rem; display: none;
+      font-size: 0.9rem; font-weight: 700; text-align: center;
+    }
+    .result-panel.match    { background: rgba(16,185,129,0.1); border: 1px solid var(--green); color: var(--green); }
+    .result-panel.no-match { background: rgba(239,68,68,0.1);  border: 1px solid var(--red);   color: var(--red);   }
+
+    .log-box {
+      font-family: var(--mono); font-size: 0.68rem; color: var(--muted);
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 0.6rem 0.75rem;
+      max-height: 140px; overflow-y: auto; line-height: 1.6;
+      white-space: pre-wrap;
+    }
+
+    footer { font-size: 0.7rem; color: var(--muted); text-align: center; }
+
+    /* ── 2-Factor Progress Stepper ── */
+    .stepper {
+      display: flex; align-items: center; gap: 0; justify-content: center;
+      width: 100%; max-width: 1080px; padding: 0.5rem 0;
+    }
+    .step {
+      display: flex; flex-direction: column; align-items: center; gap: 0.3rem;
+      flex: 1; position: relative;
+    }
+    .step:not(:last-child)::after {
+      content: ""; position: absolute; top: 18px; left: calc(50% + 22px);
+      right: calc(-50% + 22px); height: 2px;
+      background: var(--border); transition: background 0.4s;
+    }
+    .step.done:not(:last-child)::after { background: var(--green); }
+    .step-icon {
+      width: 36px; height: 36px; border-radius: 50%;
+      border: 2px solid var(--border); background: var(--card);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1rem; transition: border-color 0.3s, background 0.3s;
+    }
+    .step.active .step-icon  { border-color: var(--accent); background: rgba(99,102,241,0.15); }
+    .step.done   .step-icon  { border-color: var(--green);  background: rgba(16,185,129,0.15); }
+    .step-label { font-size: 0.65rem; color: var(--muted); text-align: center; }
+    .step.active .step-label { color: var(--accent); }
+    .step.done   .step-label { color: var(--green); }
+
+    /* ── JWT Bridge card ── */
+    .jwt-row { display: flex; gap: 0.5rem; align-items: flex-start; flex-wrap: wrap; }
+    .jwt-input {
+      flex: 1; min-width: 180px; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 8px; color: var(--text);
+      padding: 0.5rem 0.75rem; font-family: var(--mono); font-size: 0.75rem;
+    }
+    .jwt-input::placeholder { color: var(--muted); }
+    .token-display {
+      font-family: var(--mono); font-size: 0.65rem; color: var(--cyan);
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 0.6rem 0.75rem; word-break: break-all;
+      min-height: 2.5rem;
+    }
+
+    /* ── Combined Auth Certificate ── */
+    .cert-panel {
+      display: none; border: 1px solid var(--green); border-radius: 12px;
+      background: rgba(16,185,129,0.05); padding: 1.25rem;
+      width: 100%; max-width: 1080px;
+    }
+    .cert-panel.active { display: block; }
+    .cert-title {
+      font-size: 0.75rem; font-weight: 700; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--green); margin-bottom: 0.75rem;
+    }
+    .cert-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 0.5rem;
+    }
+    .cert-field { background: var(--card); border-radius: 8px; padding: 0.5rem 0.75rem; }
+    .cert-field-label { font-size: 0.6rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+    .cert-field-value { font-family: var(--mono); font-size: 0.85rem; font-weight: 700; color: var(--green); margin-top: 0.15rem; word-break: break-all; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🖐 PalmGuard <span style="font-size:0.65em;color:var(--accent);background:rgba(99,102,241,0.12);padding:0.2rem 0.5rem;border-radius:6px;vertical-align:middle;">v1.0.0</span></h1>
+  <p>2-Factor Authentication — HCS-U7 Cognitive + Palm Biometric · Mission Control</p>
+  <div class="badges">
+    <span class="badge">FIPS 203 ML-KEM-768</span>
+    <span class="badge">FR2514274 · FR2514546</span>
+    <span class="badge">Zhang-Suen skeleton</span>
+    <span class="badge">Vietoris-Rips H0+H1</span>
+    <span class="badge">Zero raw biometric upload</span>
+    <span class="badge" style="color:var(--cyan);border-color:var(--cyan)">2-Factor Chain</span>
+  </div>
+</header>
+
+<!-- 2-Factor Progress Stepper -->
+<div class="stepper" id="stepper">
+  <div class="step" id="step-1">
+    <div class="step-icon">🧠</div>
+    <div class="step-label">HCS-U7<br>Cognitive Auth</div>
+  </div>
+  <div class="step" id="step-2">
+    <div class="step-icon">🔑</div>
+    <div class="step-label">Palm JWT<br>Session Bridge</div>
+  </div>
+  <div class="step" id="step-3">
+    <div class="step-icon">🌴</div>
+    <div class="step-label">Palm Biometric<br>Verify</div>
+  </div>
+  <div class="step" id="step-4">
+    <div class="step-icon">🛡️</div>
+    <div class="step-label">Auth<br>Certificate</div>
+  </div>
+</div>
+
+<!-- HCS-U7 Integration: JWT Bridge -->
+<div style="width:100%;max-width:1080px;">
+  <div class="card">
+    <div class="card-title">🔑 Step 2 — HCS-U7 Session Bridge · Palm JWT</div>
+    <p style="font-size:0.75rem;color:var(--muted);margin-bottom:0.75rem;">After HCS-U7 cognitive auth, paste your session token below to receive a palm-scoped JWT. The frontend calls <code style="color:var(--cyan)">GET /api/session/palm-token</code> on the backend bridge.</p>
+    <div class="jwt-row">
+      <input class="jwt-input" id="hcs-session-token" type="text"
+        placeholder="Paste HCS session JWT (Authorization: Bearer …)" />
+      <input class="jwt-input" style="max-width:260px;" id="bridge-url"
+        value="http://localhost:3001" placeholder="Backend URL" />
+      <button class="btn-primary" id="btn-fetch-jwt" style="flex:0 0 auto;min-width:120px;">
+        🔑 Fetch Palm JWT
+      </button>
+    </div>
+    <div style="margin-top:0.6rem;">
+      <div class="card-title">Received Palm JWT</div>
+      <div class="token-display" id="palm-jwt-display">—</div>
+    </div>
+    <div style="margin-top:0.5rem;font-size:0.65rem;color:var(--muted);">Or enter a palm JWT directly (for offline testing):
+      <input class="jwt-input" id="palm-jwt-manual" type="text" placeholder="Paste palm JWT manually" style="margin-top:0.35rem;display:block;width:100%;" />
+    </div>
+  </div>
+</div>
+
+<!-- Row 1: Camera + Skeleton -->
+<div class="layout">
+  <div class="card">
+    <div class="card-title">📸 Live Capture · MediaPipe Hands</div>
+    <div class="cam-wrap">
+      <video id="webcam" autoplay muted playsinline></video>
+      <canvas id="overlay"></canvas>
+      <div class="cam-badge" id="cam-badge">IDLE</div>
+    </div>
+    <div class="status-row" style="margin-top:0.75rem;">
+      <div class="dot" id="status-dot"></div>
+      <span id="status-text">Camera not started</span>
+    </div>
+    <div class="controls" style="margin-top:0.75rem;">
+      <button class="btn-primary"  id="btn-start">▶ Start Camera</button>
+      <button class="btn-cyan"     id="btn-enroll"  disabled>Enroll</button>
+      <button class="btn-ghost"    id="btn-verify"  disabled>Verify</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">🦴 Palm Skeleton · Zhang-Suen Thinning</div>
+    <canvas id="skeleton-canvas" width="256" height="256"></canvas>
+    <div class="card-title" style="margin-top:0.75rem;">Fractal D per Line</div>
+    <div class="line-bars">
+      <div class="line-row">
+        <span class="line-label">Heart</span>
+        <div class="line-bar-bg"><div class="line-bar-fill" id="bar-heart"></div></div>
+        <span class="line-val" id="val-heart">—</span>
+      </div>
+      <div class="line-row">
+        <span class="line-label">Head</span>
+        <div class="line-bar-bg"><div class="line-bar-fill" id="bar-head" style="background:var(--cyan)"></div></div>
+        <span class="line-val" id="val-head">—</span>
+      </div>
+      <div class="line-row">
+        <span class="line-label">Life</span>
+        <div class="line-bar-bg"><div class="line-bar-fill" id="bar-life" style="background:var(--green)"></div></div>
+        <span class="line-val" id="val-life">—</span>
+      </div>
+      <div class="line-row">
+        <span class="line-label">Fate</span>
+        <div class="line-bar-bg"><div class="line-bar-fill" id="bar-fate" style="background:var(--amber)"></div></div>
+        <span class="line-val" id="val-fate">—</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Row 2: TDA + Metrics + Result -->
+<div class="layout">
+  <div class="card">
+    <div class="card-title">🔵 TDA Persistence Diagram · H0 + H1</div>
+    <canvas id="tda-canvas" width="240" height="240"></canvas>
+    <div style="margin-top:0.5rem; font-size:0.65rem; color:var(--muted);">
+      ○ H0 (components) &nbsp; ◆ H1 (loops) &nbsp; x-axis: birth &nbsp; y-axis: death
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">📊 Biometric Metrics</div>
+    <div class="metrics-grid">
+      <div class="metric">
+        <div class="metric-label">Fractal Sim</div>
+        <div class="metric-value cyan" id="m-fractal-sim">—</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">TDA Sim</div>
+        <div class="metric-value cyan" id="m-tda-sim">—</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Combined</div>
+        <div class="metric-value" id="m-sim">—</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Threshold</div>
+        <div class="metric-value" id="m-thr">0.920</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Latency</div>
+        <div class="metric-value" id="m-latency">—</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Betti0/1</div>
+        <div class="metric-value" id="m-betti">—</div>
+      </div>
+    </div>
+
+    <div class="result-panel" id="result-panel">—</div>
+
+    <div class="card-title" style="margin-top:1rem;">Pipeline Log</div>
+    <div class="log-box" id="log-box">Waiting for capture…</div>
+  </div>
+</div>
+
+<!-- Combined Auth Certificate -->
+<div class="cert-panel" id="cert-panel">
+  <div class="cert-title">🛡️ HCS-U7 Combined Authentication Certificate</div>
+  <div class="cert-grid">
+    <div class="cert-field">
+      <div class="cert-field-label">Status</div>
+      <div class="cert-field-value" id="cert-status">AUTHENTICATED</div>
+    </div>
+    <div class="cert-field">
+      <div class="cert-field-label">Factor 1 — Cognitive</div>
+      <div class="cert-field-value" id="cert-cognitive">HCS-U7 ✓</div>
+    </div>
+    <div class="cert-field">
+      <div class="cert-field-label">Factor 2 — Palm</div>
+      <div class="cert-field-value" id="cert-palm">—</div>
+    </div>
+    <div class="cert-field">
+      <div class="cert-field-label">Similarity Score</div>
+      <div class="cert-field-value" id="cert-sim">—</div>
+    </div>
+    <div class="cert-field">
+      <div class="cert-field-label">Palm JWT</div>
+      <div class="cert-field-value" id="cert-jwt">—</div>
+    </div>
+    <div class="cert-field">
+      <div class="cert-field-label">Issued At</div>
+      <div class="cert-field-value" id="cert-time">—</div>
+    </div>
+  </div>
+</div>
+
+<footer>PalmGuard v1.0.0 · Phase 5 · HCS-U7 2-Factor Ecosystem · IA-SOLUTION</footer>
+
+<script type="module">
+  import { computePalmVector, vectorSimilarity } from "/src/fractal/boxcount.js";
+  import { skeletonize, linesToBinaryImages } from "/src/topology/skeleton.js";
+  import { computePersistence, diagramToVector, tdaVectorSimilarity } from "/src/topology/tda.js";
+  import { buildCombinedVector, combinedSimilarity, SIMILARITY_THRESHOLD } from "/src/palmguard.js";
+
+  // ── DOM refs ─────────────────────────────────────────────────────────────────
+  const video       = document.getElementById("webcam");
+  const overlayC    = document.getElementById("overlay");
+  const skelC       = document.getElementById("skeleton-canvas");
+  const tdaC        = document.getElementById("tda-canvas");
+  const camBadge    = document.getElementById("cam-badge");
+  const statusDot   = document.getElementById("status-dot");
+  const statusText  = document.getElementById("status-text");
+  const btnStart    = document.getElementById("btn-start");
+  const btnEnroll   = document.getElementById("btn-enroll");
+  const btnVerify   = document.getElementById("btn-verify");
+  const resultPanel = document.getElementById("result-panel");
+  const logBox      = document.getElementById("log-box");
+
+  const overlayCtx  = overlayC.getContext("2d");
+  const skelCtx     = skelC.getContext("2d");
+  const tdaCtx      = tdaC.getContext("2d");
+
+  // ── State ────────────────────────────────────────────────────────────────────
+  let enrolled = null; // { fractal, tda, combined }
+  let mpHands = null;
+  let lastLandmarks = null;
+  let rafId = null;
+
+  // ── Helpers ──────────────────────────────────────────────────────────────────
+  const log = (msg) => {
+    const now = new Date().toTimeString().slice(0,8);
+    logBox.textContent = `[${now}] ${msg}\n` + logBox.textContent;
+  };
+
+  const setStatus = (msg, cls = "") => {
+    statusText.textContent = msg;
+    statusDot.className = "dot" + (cls ? ` ${cls}` : "");
+  };
+
+  const setMetric = (id, val, cls = "") => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = val;
+    el.className = "metric-value" + (cls ? ` ${cls}` : "");
+  };
+
+  const setBar = (id, valId, d) => {
+    const pct = ((d - 1) / 1) * 100; // D in [1,2] → [0,100]%
+    document.getElementById(id).style.width = Math.max(0, Math.min(100, pct)) + "%";
+    document.getElementById(valId).textContent = d.toFixed(4);
+  };
+
+  // ── Synthetic palm ROI (256×256) for demo without webcam ─────────────────────
+  function syntheticPalmROI(seed = 42) {
+    const w = 256, h = 256, data = new Uint8Array(w * h).fill(200);
+    const lineYs = [65, 105, 150, 195];
+    for (const [li, ly] of lineYs.entries()) {
+      for (let x = 10; x < w - 10; x++) {
+        const jitter = Math.sin((x + seed * 17 + li * 31) / (8 + li * 2)) * 8 + seed % 3;
+        const y = ly + Math.round(jitter);
+        for (let dy = -1; dy <= 1; dy++) {
+          const yi = y + dy;
+          if (yi >= 0 && yi < h) data[yi * w + x] = 15;
+        }
+      }
+    }
+    return data;
+  }
+
+  // ── Snapshot: grab a 256×256 grayscale frame from video ──────────────────────
+  function grabGrayROI() {
+    const off = new OffscreenCanvas(256, 256);
+    const ctx = off.getContext("2d");
+    ctx.drawImage(video, 0, 0, 256, 256);
+    const img = ctx.getImageData(0, 0, 256, 256);
+    const gray = new Uint8Array(256 * 256);
+    for (let i = 0, j = 0; i < img.data.length; i += 4, j++) {
+      gray[j] = (0.299 * img.data[i] + 0.587 * img.data[i+1] + 0.114 * img.data[i+2]) | 0;
+    }
+    return gray;
+  }
+
+  // ── Skeleton canvas render ────────────────────────────────────────────────────
+  function renderSkeleton(skelResult, lines) {
+    const idata = skelCtx.createImageData(256, 256);
+    const lineColors = [[99,102,241],[6,182,212],[16,185,129],[245,158,11]];
+    for (const [li, line] of lines.slice(0,4).entries()) {
+      const col = lineColors[li] ?? [255,255,255];
+      for (const {x, y} of line.points) {
+        const idx = (y * 256 + x) * 4;
+        idata.data[idx] = col[0]; idata.data[idx+1] = col[1];
+        idata.data[idx+2] = col[2]; idata.data[idx+3] = 255;
+      }
+    }
+    for (const {x, y} of skelResult.intersections) {
+      const idx = (y * 256 + x) * 4;
+      idata.data[idx] = 239; idata.data[idx+1] = 68;
+      idata.data[idx+2] = 68; idata.data[idx+3] = 255;
+    }
+    skelCtx.putImageData(idata, 0, 0);
+  }
+
+  // ── TDA diagram render ────────────────────────────────────────────────────────
+  function renderTDA(diagram) {
+    const W = tdaC.width, H = tdaC.height, PAD = 24;
+    tdaCtx.clearRect(0, 0, W, H);
+    tdaCtx.fillStyle = "#141927";
+    tdaCtx.fillRect(0, 0, W, H);
+
+    const finite = diagram.pairs.filter(p => p.death !== Infinity);
+    if (!finite.length) return;
+
+    const maxVal = Math.max(...finite.map(p => p.death), 1);
+    const toX = v => PAD + (v / maxVal) * (W - PAD * 2);
+    const toY = v => H - PAD - (v / maxVal) * (H - PAD * 2);
+
+    // Diagonal
+    tdaCtx.strokeStyle = "#1e2539"; tdaCtx.lineWidth = 1;
+    tdaCtx.beginPath(); tdaCtx.moveTo(PAD, H - PAD); tdaCtx.lineTo(W - PAD, PAD); tdaCtx.stroke();
+
+    // Axes labels
+    tdaCtx.fillStyle = "#64748b"; tdaCtx.font = "9px monospace";
+    tdaCtx.fillText("birth →", PAD, H - 6);
+    tdaCtx.save(); tdaCtx.translate(10, H - PAD);
+    tdaCtx.rotate(-Math.PI / 2); tdaCtx.fillText("death ↑", 0, 0); tdaCtx.restore();
+
+    for (const p of finite) {
+      const x = toX(p.birth), y = toY(p.death);
+      if (p.dimension === 0) {
+        tdaCtx.fillStyle = "rgba(99,102,241,0.85)";
+        tdaCtx.beginPath(); tdaCtx.arc(x, y, 3.5, 0, Math.PI * 2); tdaCtx.fill();
+      } else {
+        tdaCtx.fillStyle = "rgba(6,182,212,0.85)";
+        tdaCtx.beginPath();
+        tdaCtx.moveTo(x, y - 4.5); tdaCtx.lineTo(x + 4, y + 3);
+        tdaCtx.lineTo(x - 4, y + 3); tdaCtx.closePath(); tdaCtx.fill();
+      }
+    }
+  }
+
+  // ── Landmark overlay ──────────────────────────────────────────────────────────
+  function drawLandmarks(lms, w, h) {
+    overlayC.width = w; overlayC.height = h;
+    overlayCtx.clearRect(0, 0, w, h);
+    if (!lms) return;
+    const PALM_KP = [0,1,5,9,13,17];
+    overlayCtx.fillStyle = "rgba(99,102,241,0.9)";
+    overlayCtx.strokeStyle = "rgba(99,102,241,0.5)";
+    overlayCtx.lineWidth = 1;
+    for (const i of PALM_KP) {
+      const lm = lms[i];
+      if (!lm) continue;
+      const x = lm.x * w, y = lm.y * h;
+      overlayCtx.beginPath(); overlayCtx.arc(x, y, 5, 0, Math.PI*2); overlayCtx.fill();
+    }
+  }
+
+  // ── Core pipeline ─────────────────────────────────────────────────────────────
+  async function runPipeline(useSynthetic = false) {
+    const t0 = performance.now();
+    const roi = useSynthetic ? syntheticPalmROI(Math.random() * 20 | 0) : grabGrayROI();
+
+    log("Skeletonizing 256×256 ROI…");
+    const skelResult = skeletonize(roi, 256, 256);
+    log(`Skeleton done — ${skelResult.pixels.length}px, ${skelResult.lines.length} segments, ${skelResult.intersections.length} nodes`);
+
+    renderSkeleton(skelResult, skelResult.lines);
+
+    const lineImgs = linesToBinaryImages(skelResult.lines, 256, 256);
+    const fractalResult = computePalmVector(lineImgs.heart, lineImgs.head, lineImgs.life, lineImgs.fate);
+
+    // Update D bars
+    setBar("bar-heart", "val-heart", fractalResult.heart.dimension);
+    setBar("bar-head",  "val-head",  fractalResult.head.dimension);
+    setBar("bar-life",  "val-life",  fractalResult.life.dimension);
+    setBar("bar-fate",  "val-fate",  fractalResult.fate.dimension);
+
+    log("Computing TDA persistence…");
+    const diagram = computePersistence(skelResult.intersections);
+    const tdaVec  = diagramToVector(diagram);
+    renderTDA(diagram);
+    setMetric("m-betti", `β0=${diagram.betti0} β1=${diagram.betti1}`);
+    log(`TDA done — ${diagram.pairs.length} pairs, β0=${diagram.betti0}, β1=${diagram.betti1}`);
+
+    const combined = buildCombinedVector(fractalResult, tdaVec);
+    const ms = Math.round(performance.now() - t0);
+    setMetric("m-latency", `${ms}ms`, ms < 500 ? "green" : ms < 1500 ? "amber" : "red");
+    log(`Pipeline done in ${ms}ms`);
+
+    return { fractal: fractalResult, tda: tdaVec, combined, diagram };
+  }
+
+  // ── Enroll ───────────────────────────────────────────────────────────────────
+  btnEnroll.addEventListener("click", async () => {
+    btnEnroll.disabled = true;
+    setStatus("Enrolling…", "processing");
+    resultPanel.style.display = "none";
+    try {
+      const useSyn = !video.srcObject;
+      if (useSyn) log("No camera — using synthetic palm ROI");
+      enrolled = await runPipeline(useSyn);
+      setStatus("Enrolled ✓ — press Verify to authenticate", "live");
+      log("Enrollment complete");
+      btnVerify.disabled = false;
+    } catch (e) {
+      setStatus("Enrollment failed: " + e.message, "error");
+      log("ERROR: " + e.message);
+    }
+    btnEnroll.disabled = false;
+  });
+
+  // ── Verify ───────────────────────────────────────────────────────────────────
+  btnVerify.addEventListener("click", async () => {
+    if (!enrolled) return;
+    btnVerify.disabled = true;
+    setStatus("Verifying…", "processing");
+    try {
+      const useSyn = !video.srcObject;
+      const live = await runPipeline(useSyn);
+      const sim  = combinedSimilarity(enrolled.combined, live.combined);
+      const fSim = vectorSimilarity(enrolled.fractal.vector, live.fractal.vector);
+      const tSim = tdaVectorSimilarity(enrolled.tda, live.tda);
+      const match = sim >= SIMILARITY_THRESHOLD;
+
+      setMetric("m-sim",        sim.toFixed(5),  match ? "green" : "red");
+      setMetric("m-fractal-sim", fSim.toFixed(5), "cyan");
+      setMetric("m-tda-sim",    tSim.toFixed(5), "cyan");
+
+      resultPanel.textContent = match
+        ? `✅ MATCH — combined similarity ${sim.toFixed(5)} ≥ ${SIMILARITY_THRESHOLD}`
+        : `❌ NO MATCH — similarity ${sim.toFixed(5)} < ${SIMILARITY_THRESHOLD}`;
+      resultPanel.className = "result-panel " + (match ? "match" : "no-match");
+      resultPanel.style.display = "block";
+
+      setStatus(match ? "Authentication successful" : "Authentication rejected", match ? "live" : "error");
+      log(`Verify: sim=${sim.toFixed(5)} fractal=${fSim.toFixed(4)} TDA=${tSim.toFixed(4)} → ${match?"MATCH":"REJECT"}`);
+    } catch (e) {
+      setStatus("Verification error: " + e.message, "error");
+      log("ERROR: " + e.message);
+    }
+    btnVerify.disabled = false;
+  });
+
+  // ── Camera start ─────────────────────────────────────────────────────────────
+  btnStart.addEventListener("click", async () => {
+    setStatus("Requesting camera…", "processing");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" }
+      });
+      video.srcObject = stream;
+      await video.play();
+
+      btnStart.disabled = true;
+      btnEnroll.disabled = false;
+      camBadge.textContent = "LIVE";
+      camBadge.classList.add("recording");
+
+      // MediaPipe Hands live overlay
+      if (typeof Hands !== "undefined") {
+        mpHands = new Hands({ locateFile: f =>
+          `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${f}` });
+        await mpHands.setOptions({ maxNumHands:1, modelComplexity:1,
+          minDetectionConfidence:0.7, minTrackingConfidence:0.5 });
+        mpHands.onResults(r => {
+          lastLandmarks = r.multiHandLandmarks?.[0] ?? null;
+          const rect = video.getBoundingClientRect();
+          drawLandmarks(lastLandmarks, rect.width || 640, rect.height || 480);
+        });
+        const sendFrame = async () => {
+          if (video.srcObject) {
+            await mpHands.send({ image: video });
+            rafId = requestAnimationFrame(sendFrame);
+          }
+        };
+        rafId = requestAnimationFrame(sendFrame);
+        setStatus("Camera live — palm landmark overlay active", "live");
+        log("MediaPipe Hands initialized");
+      } else {
+        setStatus("Camera live — MediaPipe CDN not available", "live");
+        log("MediaPipe not available (CDN blocked?) — landmark overlay disabled");
+      }
+    } catch (e) {
+      setStatus("Camera error — using synthetic mode", "error");
+      log("Camera error: " + e.message + " — synthetic mode active");
+      btnEnroll.disabled = false;
+      camBadge.textContent = "SIM";
+    }
+  });
+
+  // ── Phase 5: Step state ───────────────────────────────────────────────────
+  let palmJwt = null;
+
+  function setStep(n) {
+    for (let i = 1; i <= 4; i++) {
+      const el = document.getElementById(`step-${i}`);
+      el.classList.remove("active", "done");
+      if (i < n) el.classList.add("done");
+      else if (i === n) el.classList.add("active");
+    }
+  }
+  setStep(1);
+
+  // ── JWT Bridge: fetch palm token from session bridge ─────────────────────
+  document.getElementById("btn-fetch-jwt").addEventListener("click", async () => {
+    const sessionToken = document.getElementById("hcs-session-token").value.trim();
+    const bridgeUrl    = document.getElementById("bridge-url").value.trim();
+    const display      = document.getElementById("palm-jwt-display");
+    if (!sessionToken) { display.textContent = "⚠ Paste your HCS session JWT first"; return; }
+    display.textContent = "Fetching…";
+    try {
+      const res = await fetch(`${bridgeUrl}/api/session/palm-token`, {
+        headers: { Authorization: `Bearer ${sessionToken}` }
+      });
+      const data = await res.json();
+      if (res.ok && data.palmToken) {
+        palmJwt = data.palmToken;
+        display.textContent = palmJwt;
+        document.getElementById("palm-jwt-manual").value = palmJwt;
+        document.getElementById("cert-jwt").textContent = palmJwt.slice(0, 40) + "…";
+        setStep(2);
+        log(`Palm JWT received (exp: ${data.expiresIn}s, userId: ${data.userId ?? "?"})`);
+      } else {
+        display.textContent = `Error: ${JSON.stringify(data)}`;
+        log("JWT bridge error: " + JSON.stringify(data));
+      }
+    } catch (e) {
+      display.textContent = `Network error: ${e.message}`;
+      log("JWT bridge network error: " + e.message);
+    }
+  });
+
+  // Pick up manually entered JWT
+  document.getElementById("palm-jwt-manual").addEventListener("input", (e) => {
+    const v = e.target.value.trim();
+    if (v.split(".").length === 3) {
+      palmJwt = v;
+      document.getElementById("palm-jwt-display").textContent = v;
+      document.getElementById("cert-jwt").textContent = v.slice(0, 40) + "…";
+      setStep(2);
+      log("Palm JWT set manually");
+    }
+  });
+
+  // Override Verify to use JWT and update certificate
+  const _originalVerify = btnVerify.onclick;
+  btnVerify.addEventListener("click", () => {
+    // step advances when Verify is clicked
+    setStep(3);
+  });
+
+  // Patch: after verify completes, update certificate
+  const origVerifyResult = resultPanel;
+  const observer = new MutationObserver(() => {
+    if (resultPanel.style.display !== "none") {
+      const isMatch = resultPanel.classList.contains("match");
+      const sim     = document.getElementById("m-sim").textContent;
+      document.getElementById("cert-palm").textContent  = isMatch ? "Palm ✓" : "Palm ✗";
+      document.getElementById("cert-sim").textContent   = sim;
+      document.getElementById("cert-status").textContent = isMatch ? "AUTHENTICATED" : "REJECTED";
+      document.getElementById("cert-status").style.color = isMatch ? "var(--green)" : "var(--red)";
+      document.getElementById("cert-time").textContent  = new Date().toISOString();
+      document.getElementById("cert-panel").classList.add("active");
+      setStep(isMatch ? 4 : 3);
+    }
+  });
+  observer.observe(resultPanel, { attributes: true, attributeFilter: ["style"] });
+
+  log("PalmGuard v1.0.0 — Phase 5 initialized. Use Step 2 to fetch a Palm JWT, then Enroll / Verify.");
+  btnEnroll.disabled = false; // allow synthetic enroll without camera
+</script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "lib": ["ES2022"],
+    "outDir": "dist/api",
+    "rootDir": "src"
+  },
+  "include": [
+    "src/api/**/*.ts",
+    "src/db/**/*.ts",
+    "src/config.ts",
+    "src/fractal/**/*.ts",
+    "src/topology/**/*.ts",
+    "src/crypto/**/*.ts"
+  ]
+}

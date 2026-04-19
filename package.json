@@ -1,0 +1,54 @@
+{
+  "name": "@hcs-u7/palmguard",
+  "version": "1.0.0",
+  "description": "Palm biometric authentication — fractal dimension + TDA for HCS-U7",
+  "type": "module",
+  "main": "dist/api/index.js",
+  "scripts": {
+    "dev": "vite src/demo",
+    "build": "tsc --noEmit && vite build",
+    "build:api": "tsc -p tsconfig.api.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "api:dev": "node --watch --loader ts-node/esm src/api/start.ts",
+    "lint": "eslint src tests --ext .ts"
+  },
+  "dependencies": {
+    "@mediapipe/hands": "^0.4.1675469240",
+    "@techstark/opencv-js": "^4.9.0-release.1",
+    "astronomia": "^4.1.1",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "@supabase/supabase-js": "^2.43.0",
+    "mlkem": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.11.5",
+    "@vitest/coverage-v8": "^1.2.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.12",
+    "vitest": "^1.2.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "keywords": [
+    "biometrics",
+    "palm",
+    "fractal",
+    "tda",
+    "ml-kem",
+    "hcs-u7",
+    "post-quantum"
+  ],
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zefparis/palmguard"
+  }
+}
