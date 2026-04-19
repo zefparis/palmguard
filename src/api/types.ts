@@ -62,6 +62,12 @@ export interface ApiError {
 
 export type ApiResponse<T> = T | ApiError;
 
+/** GET /api/palm/enroll/:userId — response */
+export interface EnrollStatusResponse {
+  enrolled: boolean;
+  enrolledAt?: string;
+}
+
 /** DELETE /api/palm/enroll/:userId — response */
 export interface DeleteEnrollResponse {
   deleted: true;

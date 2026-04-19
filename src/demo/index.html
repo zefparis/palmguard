@@ -320,6 +320,33 @@
       border-radius:999px; padding:0.15rem 0.6rem; font-size:0.65rem; color:var(--accent);
       font-family:var(--mono); margin:0.15rem;
     }
+
+    /* ── Returning-user banner ── */
+    .returning-banner {
+      display:none; width:100%; max-width:1080px;
+      background:rgba(16,185,129,0.08); border:1px solid rgba(16,185,129,0.3);
+      border-radius:12px; padding:0.75rem 1rem;
+      backdrop-filter:blur(12px);
+      display:none; align-items:center; gap:0.75rem; flex-wrap:wrap;
+      animation:fadeSlideIn 0.4s ease;
+    }
+    .returning-banner.visible { display:flex; }
+    .returning-badge {
+      background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.4);
+      border-radius:999px; padding:0.2rem 0.65rem;
+      font-size:0.68rem; font-weight:700; color:var(--green); font-family:var(--mono);
+    }
+    .returning-msg { font-size:0.82rem; color:var(--green); flex:1; }
+    .returning-enrolled-at { font-size:0.65rem; color:var(--muted); font-family:var(--mono); }
+    .guest-label {
+      margin-left:auto; font-size:0.68rem; font-family:var(--mono);
+      color:var(--muted); white-space:nowrap;
+    }
+    .btn-danger {
+      background:rgba(239,68,68,0.1); color:var(--red);
+      border:1px solid rgba(239,68,68,0.3); flex:none;
+    }
+    .btn-danger:hover:not(:disabled) { background:rgba(239,68,68,0.2); }
   </style>
 </head>
 <body>
@@ -363,6 +390,13 @@
   </div>
 </div>
 
+<!-- Returning-user banner (shown on load if localStorage enrollment found) -->
+<div class="returning-banner" id="returning-banner">
+  <span class="returning-badge">🔄 Returning User</span>
+  <span class="returning-msg" id="returning-msg">Palm enrollment found ✓</span>
+  <span class="returning-enrolled-at" id="returning-enrolled-at"></span>
+</div>
+
 <!-- Error display -->
 <div class="error-box" id="error-box"></div>
 
@@ -399,6 +433,7 @@
     <div class="status-row" style="margin-top:0.75rem;">
       <div class="dot" id="status-dot"></div>
       <span id="status-text">Camera not started</span>
+      <span class="guest-label" id="guest-label"></span>
     </div>
     <div class="controls" style="margin-top:0.75rem;">
       <button class="btn-primary"  id="btn-start">▶ Start Camera</button>
@@ -870,6 +905,10 @@
 
   // ── Enroll ───────────────────────────────────────────────────────────────────────────
   btnEnroll.addEventListener("click", async () => {
+    // Re-enroll guard: if already enrolled, require confirmation
+    if (enrolled && btnEnroll.textContent.includes('Re-enroll')) {
+      if (!confirm('Re-enrolling will overwrite your current palm template. Continue?')) return;
+    }
     btnEnroll.disabled = true;
     setStatus("Position your palm…", "processing");
     resultPanel.style.display = "none";
@@ -881,10 +920,15 @@
       if (useSyn) log("No camera — using synthetic palm ROI");
       setStatus("Enrolling…", "processing");
       enrolled = await runPipeline(useSyn);
+      const enrolledAt = new Date().toISOString();
+      saveEnrollmentLocally(enrolled, enrolledAt);
       navigator.vibrate?.([60, 40, 60]);
       setStatus("Enrolled ✓ — press Verify to authenticate", "live");
-      log(`Enrollment complete — guest ${guestId.slice(0,8)}…`);
+      log(`Enrollment complete — guest ${shortId}`);
       btnVerify.disabled = false;
+      btnVerify.className = 'btn-cyan';
+      btnEnroll.textContent = 'Re-enroll';
+      btnEnroll.className   = 'btn-danger';
       setStep(2);
       // Best-effort server-side persist
       fetch(`${API_BASE}/api/enroll`, {
@@ -1045,12 +1089,117 @@
     }
   });
 
-  // ── Config ────────────────────────────────────────────────────────────────
+  // ── Config ──────────────────────────────────────────────────────────────────────────────
   const API_BASE   = 'https://palmguard.onrender.com';
   const DEMO_TOKEN = 'demo';
-  const guestId    = crypto.randomUUID();
+  const DEMO_TENANT = 'demo';
 
-  // ── 3-Step stepper ────────────────────────────────────────────────────────
+  // ── Persistent guestId ────────────────────────────────────────────────────────────
+  const LS_GUEST_ID  = 'palmguard_guest_id';
+  const LS_ENROLLED  = 'palmguard_enrolled';
+
+  let guestId = localStorage.getItem(LS_GUEST_ID);
+  const isReturning = !!guestId;
+  if (!guestId) {
+    guestId = crypto.randomUUID();
+    localStorage.setItem(LS_GUEST_ID, guestId);
+  }
+
+  // Display truncated ID: first 4 + last 4 of the UUID
+  const shortId = guestId.slice(0,4) + '-' + guestId.slice(-4);
+  document.getElementById('guest-label').textContent = 'Guest · ' + shortId;
+
+  // ── Save / load enrollment from localStorage ─────────────────────────────
+  function saveEnrollmentLocally(e, enrolledAt) {
+    try {
+      localStorage.setItem(LS_ENROLLED, JSON.stringify({
+        combined:      Array.from(e.combined),
+        fractalVector: Array.from(e.fractal.vector),
+        fractalD: {
+          heart: e.fractal.heart.dimension,
+          head:  e.fractal.head.dimension,
+          life:  e.fractal.life.dimension,
+          fate:  e.fractal.fate.dimension,
+        },
+        tda:       Array.from(e.tda),
+        enrolledAt: enrolledAt ?? new Date().toISOString(),
+      }));
+    } catch (_) { /* localStorage full or blocked */ }
+  }
+
+  function loadEnrollmentLocally() {
+    try {
+      const raw = localStorage.getItem(LS_ENROLLED);
+      if (!raw) return null;
+      const d = JSON.parse(raw);
+      return {
+        combined: Float32Array.from(d.combined),
+        fractal: {
+          vector: Float32Array.from(d.fractalVector),
+          heart:  { dimension: d.fractalD.heart },
+          head:   { dimension: d.fractalD.head },
+          life:   { dimension: d.fractalD.life },
+          fate:   { dimension: d.fractalD.fate },
+        },
+        tda:     Float32Array.from(d.tda),
+        geoVec:  null,
+        diagram: null,
+        enrolledAt: d.enrolledAt,
+      };
+    } catch (_) { return null; }
+  }
+
+  // ── Check enrollment status (server-side, best-effort) ───────────────────
+  async function checkServerEnrollment() {
+    try {
+      const r = await fetch(
+        `${API_BASE}/api/palm/enroll/${encodeURIComponent(guestId)}?tenantId=${DEMO_TENANT}`,
+        { headers: { 'X-Internal-Token': DEMO_TOKEN } }
+      );
+      if (!r.ok) return null;
+      const j = await r.json();
+      return j.enrolled ? j : null;
+    } catch (_) { return null; }
+  }
+
+  // ── Apply returning-user UI state ────────────────────────────────────────
+  function applyReturningUser(enrolledAt) {
+    const banner    = document.getElementById('returning-banner');
+    const msgEl     = document.getElementById('returning-msg');
+    const atEl      = document.getElementById('returning-enrolled-at');
+    banner.classList.add('visible');
+    msgEl.textContent = 'Welcome back — palm enrollment found ✓';
+    atEl.textContent  = enrolledAt ? 'Enrolled: ' + new Date(enrolledAt).toLocaleString() : '';
+    btnVerify.disabled  = false;
+    btnVerify.className = 'btn-cyan';    // promote to primary CTA
+    btnEnroll.textContent = 'Re-enroll';
+    btnEnroll.className   = 'btn-danger';
+    setStep(2);
+    log(`Returning user — guest ${shortId} — enrollment found`);
+  }
+
+  // ── Initialise on page load ────────────────────────────────────────────────
+  (async () => {
+    // 1. Try localStorage first (instant, no network)
+    const localEnroll = loadEnrollmentLocally();
+    if (localEnroll) {
+      enrolled = localEnroll;
+      applyReturningUser(localEnroll.enrolledAt);
+    }
+
+    // 2. Background server check (may confirm or supplement localStorage)
+    if (isReturning) {
+      const serverEnroll = await checkServerEnrollment();
+      if (serverEnroll && !localEnroll) {
+        applyReturningUser(serverEnroll.enrolledAt);
+        log(`Server confirms enrollment — no local data (use Enroll to capture locally)`);
+      } else if (serverEnroll) {
+        log(`Server confirms enrollment — enrolledAt: ${serverEnroll.enrolledAt}`);
+      }
+    }
+  })();
+
+  // ── 3-Step stepper ────────────────────────────────────────────────────────────────────
   function setStep(n) {
     for (let i = 1; i <= 3; i++) {
       const el = document.getElementById(`step-${i}`);
@@ -1059,9 +1208,9 @@
       else if (i === n) el.classList.add("active");
     }
   }
-  setStep(1);
+  setStep(enrolled ? 2 : 1);
 
-  log(`PalmGuard v1.0.0 — guest ${guestId.slice(0,8)}… — Start camera → Enroll → Verify`);
+  log(`PalmGuard v1.0.0 — guest ${shortId} — ${isReturning ? 'returning user' : 'new session'}`);
 </script>
 </body>
 </html>

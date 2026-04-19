@@ -32,6 +32,7 @@ import type {
   EnrollResponse,
   VerifyRequest,
   VerifyResponse,
+  EnrollStatusResponse,
   DeleteEnrollResponse,
   ApiError,
 } from "./types.js";
@@ -231,6 +232,42 @@ export function createPalmRoutes({ repo, limiter }: RouteDeps): Router {
         console.error("[palmguard] verify error:", err instanceof Error ? err.message : err);
         statusCode = 500;
         body = { success: false, code: "INTERNAL_ERROR", message: "Verification failed" };
+      }
+
+      await timingFloor(start);
+      res.status(statusCode).json(body!);
+    }
+  );
+
+  // ── GET /enroll/:userId — enrollment status check (no biometric data returned)
+
+  router.get(
+    "/enroll/:userId",
+    requireAuth,
+    async (req: Request, res: Response<EnrollStatusResponse | ApiError>) => {
+      const start  = res.locals["startMs"] as number ?? Date.now();
+      let statusCode = 200;
+      let body: EnrollStatusResponse | ApiError;
+
+      try {
+        const targetUserId = req.params["userId"] ?? "";
+        const tenantId     = (req.query["tenantId"] as string | undefined) ?? "demo";
+
+        if (!targetUserId) {
+          statusCode = 400;
+          body = { success: false, code: "INVALID_REQUEST", message: "userId param required" };
+        } else {
+          const enrollment = await repo.findEnrollment(tenantId, targetUserId);
+          if (enrollment) {
+            body = { enrolled: true, enrolledAt: new Date(enrollment.capturedAt).toISOString() };
+          } else {
+            body = { enrolled: false };
+          }
+        }
+      } catch (err) {
+        console.error("[palmguard] enroll status error:", err instanceof Error ? err.message : err);
+        statusCode = 500;
+        body = { success: false, code: "INTERNAL_ERROR", message: "Status check failed" };
       }
 
       await timingFloor(start);
