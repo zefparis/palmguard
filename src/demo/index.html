@@ -1076,6 +1076,14 @@
       document.getElementById("cert-time").textContent    = new Date().toISOString();
       document.getElementById("cert-panel").classList.add("active");
       setStep(3);
+
+      // Return-to-caller: redirect after 2s on successful match
+      if (match && returnUrl) {
+        setStatus("Authenticated ✔ — returning to application…", "live");
+        setTimeout(() => {
+          window.location.href = returnUrl + '?palm_verified=1&score=' + sim.toFixed(4);
+        }, 2000);
+      }
     } catch (e) {
       setStatus("Verification error: " + e.message, "error");
       log("ERROR: " + e.message);
@@ -1169,6 +1177,11 @@
       console.error("[PalmGuard] MediaPipe Hands initialized ✓");
       setStatus("Camera live — palm landmark overlay active", "live");
       log("MediaPipe Hands initialized ✓");
+      // Auto-verify in mode=verify once landmarks are flowing
+      if (urlMode === 'verify' && enrolled && !btnVerify.disabled) {
+        setStatus("Auto-verify… hold your palm steady", "processing");
+        setTimeout(() => { if (!btnVerify.disabled) btnVerify.click(); }, 1200);
+      }
     } catch (mpErr) {
       const msg = "MediaPipe init error: " + mpErr.name + ": " + mpErr.message;
       console.error("[PalmGuard]", msg);
@@ -1182,6 +1195,11 @@
   const API_BASE   = 'https://palmguard.onrender.com';
   const DEMO_TOKEN = 'demo';
   const DEMO_TENANT = 'demo';
+
+  // ── URL params: returnUrl + mode ───────────────────────────────────────────────────────
+  const _urlParams = new URLSearchParams(window.location.search);
+  const returnUrl  = _urlParams.get('returnUrl'); // caller to redirect back to on success
+  const urlMode    = _urlParams.get('mode');      // 'enroll' | 'verify' | null
 
   // ── Persistent guestId ────────────────────────────────────────────────────────────
   const LS_GUEST_ID  = 'palmguard_guest_id';
@@ -1280,6 +1298,12 @@
     if (localEnroll) {
       enrolled = localEnroll;
       applyReturningUser(localEnroll.enrolledAt);
+    }
+
+    // mode=enroll: hide Verify, focus Enroll as primary CTA
+    if (urlMode === 'enroll') {
+      btnVerify.style.display = 'none';
+      btnEnroll.focus();
     }
 
     // 2. Background server check (may confirm or supplement localStorage)
