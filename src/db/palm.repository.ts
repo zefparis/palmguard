@@ -91,20 +91,19 @@ class SupabaseRepository implements PalmRepository {
   constructor(private readonly client: SupabaseClient) {}
 
   async enroll(record: EnrollRecord): Promise<void> {
-    console.log('[palmguard] enroll insert payload keys:', Object.keys(record));
     const { error } = await this.client.from("palm_enrollments").insert({
       id:                  record.enrollmentId,
       tenant_id:           record.tenantId,
       user_id:             record.userId,
       content_hash:        record.contentHash,
-      template_ciphertext: Buffer.from(record.templateCiphertext).toString("base64"),
-      public_key:          Buffer.from(record.publicKey).toString("base64"),
-      kem_privkey_enc:     `\\x${Buffer.from(record.kemPrivkeyEnc).toString("hex")}`,
-      kek_iv:              `\\x${Buffer.from(record.kekIv).toString("hex")}`,
-      captured_at_unix_ms: record.capturedAt,
+      template_ciphertext: record.templateCiphertext,
+      public_key:          record.publicKey,
+      kem_privkey_enc:     record.kemPrivkeyEnc,
+      kek_iv:              record.kekIv,
+      captured_at:         record.capturedAt,
       julian_day_number:   record.celestialJdn,
-      capture_confidence:  1.0,
-      template_version:    record.templateVersion,
+      capture_confidence:  record.captureConfidence ?? 1.0,
+      template_version:    record.templateVersion ?? '1.0',
       is_active:           true,
     });
 
@@ -136,17 +135,17 @@ class SupabaseRepository implements PalmRepository {
     if (!data) return null;
 
     return {
-      tenantId:           data.tenant_id as string,
-      userId:             data.user_id as string,
-      contentHash:        data.content_hash as string,
-      enrollmentId:       data.id as string,
-      templateCiphertext: Buffer.from(data.template_ciphertext as string, "base64"),
-      publicKey:          Buffer.from(data.public_key as string, "base64"),
-      kemPrivkeyEnc:      Buffer.from((data.kem_privkey_enc as string).replace(/^\\x/, ""), "hex"),
-      kekIv:              Buffer.from((data.kek_iv as string).replace(/^\\x/, ""), "hex"),
-      capturedAt:         data.captured_at_unix_ms as number,
-      celestialJdn:       data.julian_day_number as number,
-      templateVersion:    data.template_version as string,
+      tenantId:           data.tenant_id           as string,
+      userId:             data.user_id              as string,
+      contentHash:        data.content_hash         as string,
+      enrollmentId:       data.id                   as string,
+      templateCiphertext: Buffer.from((data.template_ciphertext as string).replace(/^\\x/, ""), "hex"),
+      publicKey:          Buffer.from((data.public_key          as string).replace(/^\\x/, ""), "hex"),
+      kemPrivkeyEnc:      Buffer.from((data.kem_privkey_enc     as string).replace(/^\\x/, ""), "hex"),
+      kekIv:              Buffer.from((data.kek_iv              as string).replace(/^\\x/, ""), "hex"),
+      capturedAt:         data.captured_at          as number,
+      celestialJdn:       data.julian_day_number    as number,
+      templateVersion:    data.template_version     as string,
     };
   }
 
@@ -238,7 +237,6 @@ export async function createPalmRepository(
     console.warn("[palmguard] SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY absent — using NoopRepository");
     return new NoopRepository();
   }
-  console.log('[palmguard] createPalmRepository: using SupabaseRepository (env vars present)');
   const client = await getSharedClient(effectiveUrl, effectiveKey);
   return new SupabaseRepository(client);
 }
@@ -247,10 +245,6 @@ export async function createPalmRepository(
 export function createPalmRepositorySync(
   overrideRepo?: PalmRepository | null
 ): PalmRepository {
-  if (overrideRepo) {
-    console.log('[palmguard] createPalmRepositorySync: using injected override repo');
-    return overrideRepo;
-  }
-  console.warn('[palmguard] createPalmRepositorySync: SUPABASE creds not checked (sync) — using NoopRepository. Server will degrade to Noop until async init.');
+  if (overrideRepo) return overrideRepo;
   return new NoopRepository();
 }

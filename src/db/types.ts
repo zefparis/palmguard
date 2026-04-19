@@ -15,6 +15,7 @@ export interface EnrollRecord {
   capturedAt:        number;      // unix ms
   celestialJdn:      number;
   templateVersion:   string;
+  captureConfidence?: number;
 }
 
 export type AuditEventType =
