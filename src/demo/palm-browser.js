@@ -7,19 +7,24 @@
 /** Cosine similarity threshold for authentication decision. */
 export const SIMILARITY_THRESHOLD = 0.92;
 
-/** Combined vector dimension: 6 (fractal) + 32 (TDA). */
-export const COMBINED_DIM = 38;
+/** Combined vector dimension: 6 (fractal) + 32 (TDA) + 12 (geometry). */
+export const COMBINED_DIM = 50;
+export const GEO_DIM = 12;
 
 /**
- * Build the 38-float combined biometric vector from fractal + TDA components.
+ * Build the 50-float combined biometric vector.
  * @param {import('../../fractal/boxcount').PalmBiometricVector} fractal
  * @param {Float32Array} tda
+ * @param {Float32Array|null} geoVec  12 normalised inter-landmark distances (or null → zeros)
  * @returns {Float32Array}
  */
-export function buildCombinedVector(fractal, tda) {
+export function buildCombinedVector(fractal, tda, geoVec = null) {
   const v = new Float32Array(COMBINED_DIM);
-  for (let i = 0; i < 6; i++) v[i] = fractal.vector[i] ?? 0;
-  for (let i = 0; i < 32; i++) v[6 + i] = tda[i] ?? 0;
+  for (let i = 0; i < 6;        i++) v[i]      = fractal.vector[i] ?? 0;
+  for (let i = 0; i < 32;       i++) v[6  + i] = tda[i]            ?? 0;
+  if (geoVec) {
+    for (let i = 0; i < GEO_DIM; i++) v[38 + i] = geoVec[i]        ?? 0;
+  }
   return v;
 }
 

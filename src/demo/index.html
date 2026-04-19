@@ -553,21 +553,67 @@
     }
   }
 
-  // ── Landmark overlay ──────────────────────────────────────────────────────────
+  // ── Landmark overlay — 21 points, colour-coded by zone ─────────────────────
+  const LM_COLORS = [
+    /* 0  wrist  */ "#ffffff",
+    /* 1-4  thumb  */ "#ef4444","#ef4444","#ef4444","#ef4444",
+    /* 5-8  index  */ "#3b82f6","#3b82f6","#3b82f6","#3b82f6",
+    /* 9-12 middle */ "#22c55e","#22c55e","#22c55e","#22c55e",
+    /* 13-16 ring  */ "#eab308","#eab308","#eab308","#eab308",
+    /* 17-20 pinky */ "#f97316","#f97316","#f97316","#f97316",
+  ];
+  const PALM_BASE   = new Set([0,1,5,9,13,17]); // cyan + bigger
+  const LM_CONNS    = [
+    [0,1],[1,2],[2,3],[3,4],
+    [0,5],[5,6],[6,7],[7,8],
+    [0,9],[9,10],[10,11],[11,12],
+    [0,13],[13,14],[14,15],[15,16],
+    [0,17],[17,18],[18,19],[19,20],
+    [5,9],[9,13],[13,17],           // palm arch
+  ];
+
   function drawLandmarks(lms, w, h) {
     overlayC.width = w; overlayC.height = h;
     overlayCtx.clearRect(0, 0, w, h);
     if (!lms) return;
-    const PALM_KP = [0,1,5,9,13,17];
-    overlayCtx.fillStyle = "rgba(99,102,241,0.9)";
-    overlayCtx.strokeStyle = "rgba(99,102,241,0.5)";
-    overlayCtx.lineWidth = 1;
-    for (const i of PALM_KP) {
+
+    // Skeleton connections
+    overlayCtx.lineWidth = 1.5;
+    for (const [a, b] of LM_CONNS) {
+      const la = lms[a], lb = lms[b];
+      if (!la || !lb) continue;
+      overlayCtx.strokeStyle = "rgba(255,255,255,0.20)";
+      overlayCtx.beginPath();
+      overlayCtx.moveTo(la.x * w, la.y * h);
+      overlayCtx.lineTo(lb.x * w, lb.y * h);
+      overlayCtx.stroke();
+    }
+
+    // Landmark dots
+    for (let i = 0; i < 21; i++) {
       const lm = lms[i];
       if (!lm) continue;
       const x = lm.x * w, y = lm.y * h;
-      overlayCtx.beginPath(); overlayCtx.arc(x, y, 5, 0, Math.PI*2); overlayCtx.fill();
+      if (PALM_BASE.has(i)) {
+        overlayCtx.fillStyle = "rgba(6,182,212,0.95)"; // cyan
+        overlayCtx.beginPath(); overlayCtx.arc(x, y, 7, 0, Math.PI * 2); overlayCtx.fill();
+      } else {
+        overlayCtx.globalAlpha = 0.85;
+        overlayCtx.fillStyle = LM_COLORS[i] ?? "#ffffff";
+        overlayCtx.beginPath(); overlayCtx.arc(x, y, 4, 0, Math.PI * 2); overlayCtx.fill();
+        overlayCtx.globalAlpha = 1.0;
+      }
     }
+  }
+
+  // ── Geometry vector — 12 inter-landmark distances, normalised by hand size ───
+  const GEO_PAIRS = [[0,5],[0,9],[0,13],[0,17],[5,9],[9,13],[13,17],[5,17],[1,5],[1,17],[9,0],[5,13]];
+
+  function computeGeoVector(lms) {
+    if (!lms || lms.length < 21) return null;
+    const d = (a, b) => Math.hypot(lms[a].x - lms[b].x, lms[a].y - lms[b].y);
+    const handSize = d(0, 9) || 1; // wrist-to-middle-base
+    return Float32Array.from(GEO_PAIRS.map(([a, b]) => d(a, b) / handSize));
   }
 
   // ── Core pipeline ─────────────────────────────────────────────────────────────
@@ -597,12 +643,15 @@
     setMetric("m-betti", `β0=${diagram.betti0} β1=${diagram.betti1}`);
     log(`TDA done — ${diagram.pairs.length} pairs, β0=${diagram.betti0}, β1=${diagram.betti1}`);
 
-    const combined = buildCombinedVector(fractalResult, tdaVec);
+    const geoVec  = computeGeoVector(lastLandmarks);
+    const combined = buildCombinedVector(fractalResult, tdaVec, geoVec);
     const ms = Math.round(performance.now() - t0);
     setMetric("m-latency", `${ms}ms`, ms < 500 ? "green" : ms < 1500 ? "amber" : "red");
-    log(`Pipeline done in ${ms}ms`);
+    const geoStr = geoVec ? `[${Array.from(geoVec).map(v => v.toFixed(3)).join(", ")}]` : "null (no landmarks)";
+    log(`Geo vector (12): ${geoStr}`);
+    log(`Pipeline done in ${ms}ms — vector dim: ${combined.length}`);
 
-    return { fractal: fractalResult, tda: tdaVec, combined, diagram };
+    return { fractal: fractalResult, tda: tdaVec, geoVec, combined, diagram };
   }
 
   // ── Enroll ───────────────────────────────────────────────────────────────────
