@@ -11,14 +11,6 @@
           "value": "default-src * 'unsafe-inline' 'unsafe-eval' blob: data:"
         },
         {
-          "key": "Cross-Origin-Opener-Policy",
-          "value": "same-origin"
-        },
-        {
-          "key": "Cross-Origin-Embedder-Policy",
-          "value": "credentialless"
-        },
-        {
           "key": "Permissions-Policy",
           "value": "camera=*"
         }
