@@ -285,7 +285,8 @@ export function createPalmRoutes({ repo, limiter }: RouteDeps): Router {
     try {
       const alive = await repo.ping();
       supabaseStatus = alive ? "ok" : "degraded";
-    } catch {
+    } catch (err) {
+      console.error('[palmguard] Supabase health check failed:', err instanceof Error ? err.message : err);
       supabaseStatus = "degraded";
     }
 

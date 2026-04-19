@@ -236,6 +236,7 @@ export async function createPalmRepository(
     console.warn("[palmguard] SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY absent — using NoopRepository");
     return new NoopRepository();
   }
+  console.log('[palmguard] createPalmRepository: using SupabaseRepository (env vars present)');
   const client = await getSharedClient(effectiveUrl, effectiveKey);
   return new SupabaseRepository(client);
 }
@@ -244,6 +245,10 @@ export async function createPalmRepository(
 export function createPalmRepositorySync(
   overrideRepo?: PalmRepository | null
 ): PalmRepository {
-  if (overrideRepo) return overrideRepo;
+  if (overrideRepo) {
+    console.log('[palmguard] createPalmRepositorySync: using injected override repo');
+    return overrideRepo;
+  }
+  console.warn('[palmguard] createPalmRepositorySync: SUPABASE creds not checked (sync) — using NoopRepository. Server will degrade to Noop until async init.');
   return new NoopRepository();
 }

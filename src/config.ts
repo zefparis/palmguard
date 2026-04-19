@@ -39,6 +39,7 @@ export function buildConfig(): PalmGuardConfig {
   const supabaseServiceKey = isProd ? requireEnv("SUPABASE_SERVICE_ROLE_KEY") : (process.env["SUPABASE_SERVICE_ROLE_KEY"] ?? null);
   const hcsTokenSecret    = optionalEnv("HCS_TOKEN_SECRET", "dev-secret-change-me");
 
+  console.log('[palmguard] raw RATE_LIMITER_MODE:', process.env['RATE_LIMITER_MODE']);
   const rateLimiterMode = (optionalEnv("RATE_LIMITER_MODE", "memory")) as RateLimiterMode;
   const port = parseInt(optionalEnv("PORT", "4010"), 10);
 
@@ -47,6 +48,7 @@ export function buildConfig(): PalmGuardConfig {
 
 // Singleton used by production paths. Tests can call buildConfig() directly.
 export const config: PalmGuardConfig = buildConfig();
+logStartup(config);
 
 export function logStartup(cfg: PalmGuardConfig): void {
   console.log("[palmguard] Starting with config keys:", {
