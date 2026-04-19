@@ -1,15 +1,31 @@
 {
   "version": 2,
-  "buildCommand": "npm run build:demo",
-  "outputDirectory": "dist/demo",
+  "builds": [
+    { "src": "src/demo/index.html", "use": "@vercel/static" }
+  ],
+  "routes": [
+    { "src": "/(.*)", "dest": "src/demo/index.html" }
+  ],
   "headers": [
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; worker-src 'self' blob:; connect-src 'self' https://palmguard.onrender.com; media-src 'self' blob:; img-src 'self' blob: data:" },
-        { "key": "Permissions-Policy", "value": "camera=(self)" },
-        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" },
-        { "key": "Cross-Origin-Embedder-Policy", "value": "credentialless" }
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src * 'unsafe-inline' 'unsafe-eval' blob: data:"
+        },
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin"
+        },
+        {
+          "key": "Cross-Origin-Embedder-Policy",
+          "value": "credentialless"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=*"
+        }
       ]
     }
   ]
