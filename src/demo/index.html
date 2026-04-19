@@ -991,6 +991,7 @@
 
   // ── Enroll ───────────────────────────────────────────────────────────────────────────
   btnEnroll.addEventListener("click", async () => {
+    console.log('[PalmGuard] Enroll clicked, enrolled:', !!enrolled, 'cameraRunning:', !!video.srcObject, 'lastLandmarks:', !!lastLandmarks);
     if (urlMode === 'verify') return; // verify mode never runs the enroll flow
     // Re-enroll guard: if already enrolled, require confirmation
     if (enrolled && btnEnroll.textContent.includes('Re-enroll')) {
@@ -1161,6 +1162,7 @@
       });
       let autoVerifyDone = false;
       mpHands.onResults(r => {
+        console.log('[PalmGuard] onResults called, landmarks:', r.multiHandLandmarks?.length ?? 0);
         lastLandmarks = r.multiHandLandmarks?.[0] ?? null;
         const score = r.multiHandedness?.[0]?.score ?? null;
         const rect = video.getBoundingClientRect();
@@ -1177,8 +1179,12 @@
           skelCtx.textAlign = 'left';
         }
         // Auto-verify on first confirmed hand detection in mode=verify
+        if (urlMode === 'verify') {
+          console.log('[PalmGuard] mode=verify onResults — enrolled:', !!enrolled, 'landmarks:', !!lastLandmarks, 'autoVerifyDone:', autoVerifyDone, 'btnVerifyDisabled:', btnVerify.disabled);
+        }
         if (urlMode === 'verify' && enrolled && lastLandmarks && !autoVerifyDone) {
           autoVerifyDone = true;
+          console.log('[PalmGuard] AUTO-VERIFY TRIGGERED — clicking btnVerify');
           setStatus("Hand detected — auto-verifying…", "processing");
           btnVerify.disabled = false; // force-enable before click
           setTimeout(() => { btnVerify.disabled = false; btnVerify.click(); }, 600);
@@ -1186,9 +1192,12 @@
       });
 
       let firstFrame = true;
+      let frameCount = 0;
       const sendFrame = async () => {
         if (!video.srcObject) return;
         try {
+          frameCount++;
+          if (frameCount % 60 === 0) console.log('[PalmGuard] RAF tick', frameCount, '— hand:', !!lastLandmarks);
           await mpHands.send({ image: video });
           if (firstFrame) {
             firstFrame = false;
@@ -1335,8 +1344,10 @@
 
     // mode=verify: hide Enroll; if no local enrollment, show error + back link
     if (urlMode === 'verify') {
+      console.log('[PalmGuard] mode=verify — enrolled:', !!enrolled, 'returnUrl:', returnUrl?.slice(0,40));
       btnEnroll.style.display = 'none';
       if (!enrolled) {
+        console.log('[PalmGuard] mode=verify — NO local enrollment, showing error');
         setStatus("No enrollment found — please enroll first", "error");
         log("mode=verify but no local enrollment found");
         if (returnUrl) {
