@@ -1,10 +1,10 @@
-<!-- PALMGUARD DEMO v5 — Phase 5 HCS-U7 2-Factor Integration -->
+<!-- PALMGUARD DEMO v6 — Standalone Biometric Auth -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PalmGuard v1.0 — HCS-U7 2-Factor Biometric Auth</title>
+  <title>PalmGuard v1.0 — Standalone Palm Biometric Auth</title>
 
   <!-- MediaPipe Hands (CDN, WASM) — must load before module scripts -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
@@ -230,58 +230,30 @@
 
 <header>
   <h1>🖐 PalmGuard <span style="font-size:0.65em;color:var(--accent);background:rgba(99,102,241,0.12);padding:0.2rem 0.5rem;border-radius:6px;vertical-align:middle;">v1.0.0</span></h1>
-  <p>2-Factor Authentication — HCS-U7 Cognitive + Palm Biometric · Mission Control</p>
+  <p>Standalone Palm Biometric Authentication · ML-KEM-768 Post-Quantum</p>
   <div class="badges">
     <span class="badge">FIPS 203 ML-KEM-768</span>
     <span class="badge">FR2514274 · FR2514546</span>
     <span class="badge">Zhang-Suen skeleton</span>
     <span class="badge">Vietoris-Rips H0+H1</span>
     <span class="badge">Zero raw biometric upload</span>
-    <span class="badge" style="color:var(--cyan);border-color:var(--cyan)">2-Factor Chain</span>
+    <span class="badge" style="color:var(--cyan);border-color:var(--cyan)">Post-Quantum</span>
   </div>
 </header>
 
-<!-- 2-Factor Progress Stepper -->
+<!-- 3-Step Progress Stepper -->
 <div class="stepper" id="stepper">
   <div class="step" id="step-1">
-    <div class="step-icon">🧠</div>
-    <div class="step-label">HCS-U7<br>Cognitive Auth</div>
+    <div class="step-icon">🌴</div>
+    <div class="step-label">Enroll<br>Palm</div>
   </div>
   <div class="step" id="step-2">
-    <div class="step-icon">🔑</div>
-    <div class="step-label">Palm JWT<br>Session Bridge</div>
+    <div class="step-icon">🔍</div>
+    <div class="step-label">Verify<br>Palm</div>
   </div>
   <div class="step" id="step-3">
-    <div class="step-icon">🌴</div>
-    <div class="step-label">Palm Biometric<br>Verify</div>
-  </div>
-  <div class="step" id="step-4">
     <div class="step-icon">🛡️</div>
     <div class="step-label">Auth<br>Certificate</div>
-  </div>
-</div>
-
-<!-- HCS-U7 Integration: JWT Bridge -->
-<div style="width:100%;max-width:1080px;">
-  <div class="card">
-    <div class="card-title">🔑 Step 2 — HCS-U7 Session Bridge · Palm JWT</div>
-    <p style="font-size:0.75rem;color:var(--muted);margin-bottom:0.75rem;">After HCS-U7 cognitive auth, paste your session token below to receive a palm-scoped JWT. The frontend calls <code style="color:var(--cyan)">GET /api/session/palm-token</code> on the backend bridge.</p>
-    <div class="jwt-row">
-      <input class="jwt-input" id="hcs-session-token" type="text"
-        placeholder="Paste HCS session JWT (Authorization: Bearer …)" />
-      <input class="jwt-input" style="max-width:260px;" id="bridge-url"
-        value="https://hcs-u7-backend-kk0n.onrender.com" placeholder="Backend URL" />
-      <button class="btn-primary" id="btn-fetch-jwt" style="flex:0 0 auto;min-width:120px;">
-        🔑 Fetch Palm JWT
-      </button>
-    </div>
-    <div style="margin-top:0.6rem;">
-      <div class="card-title">Received Palm JWT</div>
-      <div class="token-display" id="palm-jwt-display">—</div>
-    </div>
-    <div style="margin-top:0.5rem;font-size:0.65rem;color:var(--muted);">Or enter a palm JWT directly (for offline testing):
-      <input class="jwt-input" id="palm-jwt-manual" type="text" placeholder="Paste palm JWT manually" style="margin-top:0.35rem;display:block;width:100%;" />
-    </div>
   </div>
 </div>
 
@@ -380,20 +352,16 @@
   </div>
 </div>
 
-<!-- Combined Auth Certificate -->
+<!-- Auth Certificate -->
 <div class="cert-panel" id="cert-panel">
-  <div class="cert-title">🛡️ HCS-U7 Combined Authentication Certificate</div>
+  <div class="cert-title">🛡️ PalmGuard Authentication Certificate</div>
   <div class="cert-grid">
     <div class="cert-field">
       <div class="cert-field-label">Status</div>
       <div class="cert-field-value" id="cert-status">AUTHENTICATED</div>
     </div>
     <div class="cert-field">
-      <div class="cert-field-label">Factor 1 — Cognitive</div>
-      <div class="cert-field-value" id="cert-cognitive">HCS-U7 ✓</div>
-    </div>
-    <div class="cert-field">
-      <div class="cert-field-label">Factor 2 — Palm</div>
+      <div class="cert-field-label">Palm Biometric</div>
       <div class="cert-field-value" id="cert-palm">—</div>
     </div>
     <div class="cert-field">
@@ -401,8 +369,12 @@
       <div class="cert-field-value" id="cert-sim">—</div>
     </div>
     <div class="cert-field">
-      <div class="cert-field-label">Palm JWT</div>
-      <div class="cert-field-value" id="cert-jwt">—</div>
+      <div class="cert-field-label">Guest ID</div>
+      <div class="cert-field-value" id="cert-userid">—</div>
+    </div>
+    <div class="cert-field">
+      <div class="cert-field-label">Algorithm</div>
+      <div class="cert-field-value" id="cert-algo">ML-KEM-768 + TDA</div>
     </div>
     <div class="cert-field">
       <div class="cert-field-label">Issued At</div>
@@ -411,7 +383,7 @@
   </div>
 </div>
 
-<footer>PalmGuard v1.0.0 · Phase 5 · HCS-U7 2-Factor Ecosystem · IA-SOLUTION</footer>
+<footer>PalmGuard v1.0.0 · Standalone · ML-KEM-768 Post-Quantum · IA-SOLUTION</footer>
 
 <script type="module">
   import { computePalmVector, vectorSimilarity } from "/src/fractal/boxcount.js";
@@ -612,13 +584,21 @@
     btnEnroll.disabled = true;
     setStatus("Enrolling…", "processing");
     resultPanel.style.display = "none";
+    document.getElementById("cert-panel").classList.remove("active");
     try {
       const useSyn = !video.srcObject;
       if (useSyn) log("No camera — using synthetic palm ROI");
       enrolled = await runPipeline(useSyn);
       setStatus("Enrolled ✓ — press Verify to authenticate", "live");
-      log("Enrollment complete");
+      log(`Enrollment complete — guest ${guestId.slice(0,8)}…`);
       btnVerify.disabled = false;
+      setStep(2);
+      // Best-effort server-side persist
+      fetch(`${API_BASE}/api/enroll`, {
+        method: 'POST',
+        headers: { 'X-Internal-Token': DEMO_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: guestId, vector: Array.from(enrolled.combined) })
+      }).catch(() => {});
     } catch (e) {
       setStatus("Enrollment failed: " + e.message, "error");
       log("ERROR: " + e.message);
@@ -639,9 +619,9 @@
       const tSim = tdaVectorSimilarity(enrolled.tda, live.tda);
       const match = sim >= SIMILARITY_THRESHOLD;
 
-      setMetric("m-sim",        sim.toFixed(5),  match ? "green" : "red");
+      setMetric("m-sim",         sim.toFixed(5),  match ? "green" : "red");
       setMetric("m-fractal-sim", fSim.toFixed(5), "cyan");
-      setMetric("m-tda-sim",    tSim.toFixed(5), "cyan");
+      setMetric("m-tda-sim",     tSim.toFixed(5), "cyan");
 
       resultPanel.textContent = match
         ? `✅ MATCH — combined similarity ${sim.toFixed(5)} ≥ ${SIMILARITY_THRESHOLD}`
@@ -651,6 +631,16 @@
 
       setStatus(match ? "Authentication successful" : "Authentication rejected", match ? "live" : "error");
       log(`Verify: sim=${sim.toFixed(5)} fractal=${fSim.toFixed(4)} TDA=${tSim.toFixed(4)} → ${match?"MATCH":"REJECT"}`);
+
+      // Update certificate
+      document.getElementById("cert-palm").textContent    = match ? "Palm ✓" : "Palm ✗";
+      document.getElementById("cert-sim").textContent     = sim.toFixed(5);
+      document.getElementById("cert-status").textContent  = match ? "AUTHENTICATED" : "REJECTED";
+      document.getElementById("cert-status").style.color  = match ? "var(--green)" : "var(--red)";
+      document.getElementById("cert-userid").textContent  = guestId.slice(0, 16) + "…";
+      document.getElementById("cert-time").textContent    = new Date().toISOString();
+      document.getElementById("cert-panel").classList.add("active");
+      setStep(3);
     } catch (e) {
       setStatus("Verification error: " + e.message, "error");
       log("ERROR: " + e.message);
@@ -705,11 +695,14 @@
     }
   });
 
-  // ── Phase 5: Step state ───────────────────────────────────────────────────
-  let palmJwt = null;
+  // ── Config ────────────────────────────────────────────────────────────────
+  const API_BASE   = 'https://palmguard.onrender.com';
+  const DEMO_TOKEN = 'demo';
+  const guestId    = crypto.randomUUID();
 
+  // ── 3-Step stepper ────────────────────────────────────────────────────────
   function setStep(n) {
-    for (let i = 1; i <= 4; i++) {
+    for (let i = 1; i <= 3; i++) {
       const el = document.getElementById(`step-${i}`);
       el.classList.remove("active", "done");
       if (i < n) el.classList.add("done");
@@ -718,72 +711,7 @@
   }
   setStep(1);
 
-  // ── JWT Bridge: fetch palm token from session bridge ─────────────────────
-  document.getElementById("btn-fetch-jwt").addEventListener("click", async () => {
-    const sessionToken = document.getElementById("hcs-session-token").value.trim();
-    const bridgeUrl    = document.getElementById("bridge-url").value.trim();
-    const display      = document.getElementById("palm-jwt-display");
-    if (!sessionToken) { display.textContent = "⚠ Paste your HCS session JWT first"; return; }
-    display.textContent = "Fetching…";
-    try {
-      const res = await fetch(`${bridgeUrl}/api/session/palm-token`, {
-        headers: { Authorization: `Bearer ${sessionToken}` }
-      });
-      const data = await res.json();
-      if (res.ok && data.palmToken) {
-        palmJwt = data.palmToken;
-        display.textContent = palmJwt;
-        document.getElementById("palm-jwt-manual").value = palmJwt;
-        document.getElementById("cert-jwt").textContent = palmJwt.slice(0, 40) + "…";
-        setStep(2);
-        log(`Palm JWT received (exp: ${data.expiresIn}s, userId: ${data.userId ?? "?"})`);
-      } else {
-        display.textContent = `Error: ${JSON.stringify(data)}`;
-        log("JWT bridge error: " + JSON.stringify(data));
-      }
-    } catch (e) {
-      display.textContent = `Network error: ${e.message}`;
-      log("JWT bridge network error: " + e.message);
-    }
-  });
-
-  // Pick up manually entered JWT
-  document.getElementById("palm-jwt-manual").addEventListener("input", (e) => {
-    const v = e.target.value.trim();
-    if (v.split(".").length === 3) {
-      palmJwt = v;
-      document.getElementById("palm-jwt-display").textContent = v;
-      document.getElementById("cert-jwt").textContent = v.slice(0, 40) + "…";
-      setStep(2);
-      log("Palm JWT set manually");
-    }
-  });
-
-  // Override Verify to use JWT and update certificate
-  const _originalVerify = btnVerify.onclick;
-  btnVerify.addEventListener("click", () => {
-    // step advances when Verify is clicked
-    setStep(3);
-  });
-
-  // Patch: after verify completes, update certificate
-  const origVerifyResult = resultPanel;
-  const observer = new MutationObserver(() => {
-    if (resultPanel.style.display !== "none") {
-      const isMatch = resultPanel.classList.contains("match");
-      const sim     = document.getElementById("m-sim").textContent;
-      document.getElementById("cert-palm").textContent  = isMatch ? "Palm ✓" : "Palm ✗";
-      document.getElementById("cert-sim").textContent   = sim;
-      document.getElementById("cert-status").textContent = isMatch ? "AUTHENTICATED" : "REJECTED";
-      document.getElementById("cert-status").style.color = isMatch ? "var(--green)" : "var(--red)";
-      document.getElementById("cert-time").textContent  = new Date().toISOString();
-      document.getElementById("cert-panel").classList.add("active");
-      setStep(isMatch ? 4 : 3);
-    }
-  });
-  observer.observe(resultPanel, { attributes: true, attributeFilter: ["style"] });
-
-  log("PalmGuard v1.0.0 — Phase 5 initialized. Use Step 2 to fetch a Palm JWT, then Enroll / Verify.");
+  log(`PalmGuard v1.0.0 — guest ${guestId.slice(0,8)}… — Start camera → Enroll → Verify`);
   btnEnroll.disabled = false; // allow synthetic enroll without camera
 </script>
 </body>
