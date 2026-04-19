@@ -1134,6 +1134,8 @@
     await video.play();
     btnStart.disabled = true;
     btnEnroll.disabled = false;
+    // In verify mode, ensure Verify is enabled regardless of prior state
+    if (urlMode === 'verify' && enrolled) btnVerify.disabled = false;
     camBadge.textContent = "LIVE";
     camWrap.classList.add("live");
     setStatus("Camera live — initializing MediaPipe…", "processing");
@@ -1165,10 +1167,11 @@
         drawLandmarks(lastLandmarks, rect.width || 640, rect.height || 480);
         setHandDetected(!!lastLandmarks, score);
         // Auto-verify on first confirmed hand detection in mode=verify
-        if (urlMode === 'verify' && enrolled && lastLandmarks && !autoVerifyDone && !btnVerify.disabled) {
+        if (urlMode === 'verify' && enrolled && lastLandmarks && !autoVerifyDone) {
           autoVerifyDone = true;
           setStatus("Hand detected — auto-verifying…", "processing");
-          setTimeout(() => { if (!btnVerify.disabled) btnVerify.click(); }, 600);
+          btnVerify.disabled = false; // force-enable before click
+          setTimeout(() => { btnVerify.disabled = false; btnVerify.click(); }, 600);
         }
       });
 
@@ -1191,7 +1194,10 @@
       };
       rafId = requestAnimationFrame(sendFrame);
       console.error("[PalmGuard] MediaPipe Hands initialized ✓");
-      setStatus("Camera live — hold your palm in view", "live");
+      const readyMsg = (urlMode === 'verify' && enrolled)
+        ? "\u270B Show your palm to authenticate"
+        : "Camera live — palm landmark overlay active";
+      setStatus(readyMsg, "live");
       log("MediaPipe Hands initialized ✓");
     } catch (mpErr) {
       const msg = "MediaPipe init error: " + mpErr.name + ": " + mpErr.message;
