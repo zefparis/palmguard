@@ -10,10 +10,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 
-  <!-- MediaPipe Hands (CDN, WASM) — must load before module scripts -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+  <!-- MediaPipe tasks-vision (CDN, WASM) — stable 2023+ API -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js" crossorigin="anonymous"></script>
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1532,9 +1530,9 @@ function combinedSimilarity(a, b) {
     setStatus("Camera live — initializing MediaPipe…", "processing");
     log("Camera stream started");
 
-    // ── MediaPipe Hands ──
-    if (typeof Hands === "undefined") {
-      const msg = "MediaPipe Hands global not found — CDN <script> tags failed to load (CSP or network error). Check console for failed requests.";
+    // ── MediaPipe tasks-vision HandLandmarker ──
+    if (typeof HandLandmarker === "undefined" || typeof FilesetResolver === "undefined") {
+      const msg = "MediaPipe tasks-vision not loaded — vision_bundle.js CDN script failed (CSP or network error).";
       console.error("[PalmGuard]", msg);
       showError(msg);
       setStatus("Camera live — MediaPipe failed to load", "live");
@@ -1542,54 +1540,63 @@ function combinedSimilarity(a, b) {
       return;
     }
 
-    console.error("[PalmGuard] MediaPipe Hands global found, initializing model…");
+    console.error("[PalmGuard] tasks-vision found, creating HandLandmarker…");
     try {
-      mpHands = new Hands({ locateFile: f =>
-        `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${f}` });
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+      );
+      const handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
+        },
+        runningMode: "VIDEO",
+        numHands: 1
+      });
+      mpHands = handLandmarker; // keep reference for cleanup
+
       let autoVerifyDone = false;
-      mpHands.onResults(r => {
-        console.log('[PalmGuard] onResults called, landmarks:', r.multiHandLandmarks?.length ?? 0);
-        lastLandmarks = r.multiHandLandmarks?.[0] ?? null;
-        const score = r.multiHandedness?.[0]?.score ?? null;
-        const rect = video.getBoundingClientRect();
-        drawLandmarks(lastLandmarks, rect.width || 640, rect.height || 480);
-        setHandDetected(!!lastLandmarks, score);
-        // No hand: clear skeleton canvas and show waiting state
-        if (!lastLandmarks) {
-          skelCtx.fillStyle = '#000';
-          skelCtx.fillRect(0, 0, skelC.width, skelC.height);
-          skelCtx.fillStyle = 'rgba(100,116,139,0.7)';
-          skelCtx.font = '12px monospace';
-          skelCtx.textAlign = 'center';
-          skelCtx.fillText('waiting for hand\u2026', skelC.width / 2, skelC.height / 2);
-          skelCtx.textAlign = 'left';
-        }
-        // Auto-verify on first confirmed hand detection in mode=verify
-        if (urlMode === 'verify') {
-          console.log('[PalmGuard] mode=verify onResults — enrolled:', isEnrolled(), 'landmarks:', !!lastLandmarks, 'autoVerifyDone:', autoVerifyDone, 'btnVerifyDisabled:', btnVerify.disabled);
-        }
-        if (urlMode === 'verify' && isEnrolled() && lastLandmarks && !autoVerifyDone) {
-          autoVerifyDone = true;
-          console.log('[PalmGuard] AUTO-VERIFY TRIGGERED — clicking btnVerify');
-          setStatus("Hand detected — auto-verifying…", "processing");
-          btnVerify.disabled = false; // force-enable before click
-          setTimeout(() => { btnVerify.disabled = false; btnVerify.click(); }, 600);
-        }
-      });
-
-      await mpHands.setOptions({
-        maxNumHands: 1, modelComplexity: 1,
-        minDetectionConfidence: 0.7, minTrackingConfidence: 0.5
-      });
-
       let firstFrame = true;
       let frameCount = 0;
-      const sendFrame = async () => {
+
+      const sendFrame = () => {
         if (!video.srcObject) return;
         try {
           frameCount++;
           if (frameCount % 60 === 0) console.log('[PalmGuard] RAF tick', frameCount, '— hand:', !!lastLandmarks);
-          await mpHands.send({ image: video });
+
+          const results = handLandmarker.detectForVideo(video, Date.now());
+          const landmarks = results.landmarks[0] ?? null;
+          const score = results.handedness?.[0]?.[0]?.score ?? null;
+
+          console.log('[PalmGuard] onResults called, landmarks:', results.landmarks?.length ?? 0);
+          lastLandmarks = landmarks;
+          const rect = video.getBoundingClientRect();
+          drawLandmarks(lastLandmarks, rect.width || 640, rect.height || 480);
+          setHandDetected(!!lastLandmarks, score);
+
+          // No hand: clear skeleton canvas and show waiting state
+          if (!lastLandmarks) {
+            skelCtx.fillStyle = '#000';
+            skelCtx.fillRect(0, 0, skelC.width, skelC.height);
+            skelCtx.fillStyle = 'rgba(100,116,139,0.7)';
+            skelCtx.font = '12px monospace';
+            skelCtx.textAlign = 'center';
+            skelCtx.fillText('waiting for hand\u2026', skelC.width / 2, skelC.height / 2);
+            skelCtx.textAlign = 'left';
+          }
+
+          // Auto-verify on first confirmed hand detection in mode=verify
+          if (urlMode === 'verify') {
+            console.log('[PalmGuard] mode=verify onResults — enrolled:', isEnrolled(), 'landmarks:', !!lastLandmarks, 'autoVerifyDone:', autoVerifyDone, 'btnVerifyDisabled:', btnVerify.disabled);
+          }
+          if (urlMode === 'verify' && isEnrolled() && lastLandmarks && !autoVerifyDone) {
+            autoVerifyDone = true;
+            console.log('[PalmGuard] AUTO-VERIFY TRIGGERED — clicking btnVerify');
+            setStatus("Hand detected — auto-verifying…", "processing");
+            btnVerify.disabled = false;
+            setTimeout(() => { btnVerify.disabled = false; btnVerify.click(); }, 600);
+          }
+
           if (firstFrame) {
             firstFrame = false;
             console.error("[PalmGuard] First frame processed by MediaPipe ✓");
@@ -1603,12 +1610,12 @@ function combinedSimilarity(a, b) {
         rafId = requestAnimationFrame(sendFrame);
       };
       rafId = requestAnimationFrame(sendFrame);
-      console.error("[PalmGuard] MediaPipe Hands initialized ✓");
+      console.error("[PalmGuard] HandLandmarker initialized ✓");
       const readyMsg = (urlMode === 'verify' && isEnrolled())
         ? "\u270B Show your palm to authenticate"
         : "Camera live — palm landmark overlay active";
       setStatus(readyMsg, "live");
-      log("MediaPipe Hands initialized ✓");
+      log("MediaPipe HandLandmarker initialized ✓");
     } catch (mpErr) {
       const msg = "MediaPipe init error: " + mpErr.name + ": " + mpErr.message;
       console.error("[PalmGuard]", msg);
