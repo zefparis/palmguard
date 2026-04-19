@@ -1215,7 +1215,7 @@
       };
       rafId = requestAnimationFrame(sendFrame);
       console.error("[PalmGuard] MediaPipe Hands initialized ✓");
-      const readyMsg = (urlMode === 'verify' && enrolled)
+      const readyMsg = (urlMode === 'verify' && isEnrolled())
         ? "\u270B Show your palm to authenticate"
         : "Camera live — palm landmark overlay active";
       setStatus(readyMsg, "live");
