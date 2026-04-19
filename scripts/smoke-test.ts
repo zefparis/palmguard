@@ -98,9 +98,9 @@ function jwtAuth(): Record<string, string> {
   return { Authorization: `Bearer ${makeJwt(USER_ID)}` };
 }
 
-// ── Mock palm vector (18-landmark × 3D, base64url) ────────────────────────────
+// ── Mock palm vector (6 fractal floats × 4 bytes = 24 bytes) ───────────────────
 
-const MOCK_VECTOR_B64 = Buffer.alloc(18 * 3 * 4, 0x3f).toString("base64url");
+const MOCK_PALM_VECTOR = Buffer.alloc(24).fill(0x42).toString('base64');
 
 // ── Test suite ────────────────────────────────────────────────────────────────
 
@@ -134,7 +134,7 @@ async function runSmokeTest(): Promise<void> {
   console.log("\nStep 2 — POST /api/palm/enroll (X-Internal-Token)");
   const e1 = await post(
     "/api/palm/enroll",
-    { tenantId: TENANT_ID, userId: USER_ID, palmVectorB64: MOCK_VECTOR_B64, capturedAt: Date.now(), confidence: 0.95 },
+    { tenantId: TENANT_ID, userId: USER_ID, palmVectorB64: MOCK_PALM_VECTOR, capturedAt: Date.now(), confidence: 0.95 },
     auth()
   );
   if (e1.status === 201) {
@@ -152,7 +152,7 @@ async function runSmokeTest(): Promise<void> {
   console.log("\nStep 3 — POST /api/palm/verify (JWT Bearer)");
   const v1 = await post(
     "/api/palm/verify",
-    { tenantId: TENANT_ID, userId: USER_ID, palmVectorB64: MOCK_VECTOR_B64, capturedAt: Date.now() },
+    { tenantId: TENANT_ID, userId: USER_ID, palmVectorB64: MOCK_PALM_VECTOR, capturedAt: Date.now() },
     jwtAuth()
   );
   if (v1.status === 200) {
@@ -196,7 +196,7 @@ async function runSmokeTest(): Promise<void> {
   console.log("\nStep 6 — POST /api/palm/verify after delete (no enrollment)");
   const v2 = await post(
     "/api/palm/verify",
-    { tenantId: TENANT_ID, userId: USER_ID, palmVectorB64: MOCK_VECTOR_B64, capturedAt: Date.now() },
+    { tenantId: TENANT_ID, userId: USER_ID, palmVectorB64: MOCK_PALM_VECTOR, capturedAt: Date.now() },
     jwtAuth()
   );
   if (v2.status === 200) {
