@@ -5,6 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PalmGuard v1.0 — Standalone Palm Biometric Auth</title>
+  <meta http-equiv="Permissions-Policy" content="camera=(self)">
 
   <!-- MediaPipe Hands (CDN, WASM) — must load before module scripts -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
@@ -164,6 +165,16 @@
 
     footer { font-size: 0.7rem; color: var(--muted); text-align: center; }
 
+    /* ── On-screen error box ── */
+    .error-box {
+      display: none; width: 100%; max-width: 1080px;
+      background: rgba(239,68,68,0.12); border: 1px solid var(--red);
+      border-radius: 10px; padding: 0.9rem 1rem;
+      font-family: var(--mono); font-size: 0.78rem; color: var(--red);
+      white-space: pre-wrap; word-break: break-all; line-height: 1.6;
+    }
+    .error-box.visible { display: block; }
+
     /* ── 2-Factor Progress Stepper ── */
     .stepper {
       display: flex; align-items: center; gap: 0; justify-content: center;
@@ -256,6 +267,9 @@
     <div class="step-label">Auth<br>Certificate</div>
   </div>
 </div>
+
+<!-- Error display -->
+<div class="error-box" id="error-box"></div>
 
 <!-- Row 1: Camera + Skeleton -->
 <div class="layout">
@@ -419,6 +433,18 @@
   const log = (msg) => {
     const now = new Date().toTimeString().slice(0,8);
     logBox.textContent = `[${now}] ${msg}\n` + logBox.textContent;
+  };
+
+  const showError = (msg) => {
+    const box = document.getElementById("error-box");
+    if (msg) {
+      box.textContent = "❌ " + msg;
+      box.classList.add("visible");
+      console.error("[PalmGuard ERROR]", msg);
+    } else {
+      box.textContent = "";
+      box.classList.remove("visible");
+    }
   };
 
   const setStatus = (msg, cls = "") => {
@@ -650,48 +676,94 @@
 
   // ── Camera start ─────────────────────────────────────────────────────────────
   btnStart.addEventListener("click", async () => {
+    showError(null);
     setStatus("Requesting camera…", "processing");
+    console.error("[PalmGuard] getUserMedia requested");
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      const msg = "navigator.mediaDevices.getUserMedia not available — page must be served over HTTPS";
+      console.error("[PalmGuard]", msg);
+      showError(msg);
+      setStatus(msg, "error");
+      log("ERROR: " + msg);
+      return;
+    }
+
+    let stream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
+      stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" }
       });
-      video.srcObject = stream;
-      await video.play();
-
-      btnStart.disabled = true;
-      btnEnroll.disabled = false;
-      camBadge.textContent = "LIVE";
-      camBadge.classList.add("recording");
-
-      // MediaPipe Hands live overlay
-      if (typeof Hands !== "undefined") {
-        mpHands = new Hands({ locateFile: f =>
-          `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${f}` });
-        await mpHands.setOptions({ maxNumHands:1, modelComplexity:1,
-          minDetectionConfidence:0.7, minTrackingConfidence:0.5 });
-        mpHands.onResults(r => {
-          lastLandmarks = r.multiHandLandmarks?.[0] ?? null;
-          const rect = video.getBoundingClientRect();
-          drawLandmarks(lastLandmarks, rect.width || 640, rect.height || 480);
-        });
-        const sendFrame = async () => {
-          if (video.srcObject) {
-            await mpHands.send({ image: video });
-            rafId = requestAnimationFrame(sendFrame);
-          }
-        };
-        rafId = requestAnimationFrame(sendFrame);
-        setStatus("Camera live — palm landmark overlay active", "live");
-        log("MediaPipe Hands initialized");
-      } else {
-        setStatus("Camera live — MediaPipe CDN not available", "live");
-        log("MediaPipe not available (CDN blocked?) — landmark overlay disabled");
-      }
+      console.error("[PalmGuard] getUserMedia GRANTED — tracks:", stream.getVideoTracks().map(t => t.label).join(", "));
     } catch (e) {
-      setStatus("Camera error — using synthetic mode", "error");
-      log("Camera error: " + e.message + " — synthetic mode active");
-      btnEnroll.disabled = false;
-      camBadge.textContent = "SIM";
+      const msg = e.name + ": " + e.message;
+      console.error("[PalmGuard] getUserMedia DENIED —", msg);
+      showError("Camera denied — " + msg + "\n\nCheck: browser permissions, HTTPS, Permissions-Policy header.");
+      setStatus("Camera denied: " + msg, "error");
+      log("ERROR camera denied: " + msg);
+      return;
+    }
+
+    video.srcObject = stream;
+    await video.play();
+    btnStart.disabled = true;
+    btnEnroll.disabled = false;
+    camBadge.textContent = "LIVE";
+    camBadge.classList.add("recording");
+    setStatus("Camera live — initializing MediaPipe…", "processing");
+    log("Camera stream started");
+
+    // ── MediaPipe Hands ──
+    if (typeof Hands === "undefined") {
+      const msg = "MediaPipe Hands global not found — CDN <script> tags failed to load (CSP or network error). Check console for failed requests.";
+      console.error("[PalmGuard]", msg);
+      showError(msg);
+      setStatus("Camera live — MediaPipe failed to load", "live");
+      log("ERROR: " + msg);
+      return;
+    }
+
+    console.error("[PalmGuard] MediaPipe Hands global found, initializing model…");
+    try {
+      mpHands = new Hands({ locateFile: f =>
+        `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${f}` });
+      await mpHands.setOptions({
+        maxNumHands: 1, modelComplexity: 1,
+        minDetectionConfidence: 0.7, minTrackingConfidence: 0.5
+      });
+      mpHands.onResults(r => {
+        lastLandmarks = r.multiHandLandmarks?.[0] ?? null;
+        const rect = video.getBoundingClientRect();
+        drawLandmarks(lastLandmarks, rect.width || 640, rect.height || 480);
+      });
+
+      let firstFrame = true;
+      const sendFrame = async () => {
+        if (!video.srcObject) return;
+        try {
+          await mpHands.send({ image: video });
+          if (firstFrame) {
+            firstFrame = false;
+            console.error("[PalmGuard] First frame processed by MediaPipe ✓");
+            log("MediaPipe: first frame processed ✓");
+          }
+        } catch (frameErr) {
+          console.error("[PalmGuard] MediaPipe frame error:", frameErr.message);
+          showError("MediaPipe frame processing error: " + frameErr.message);
+          return;
+        }
+        rafId = requestAnimationFrame(sendFrame);
+      };
+      rafId = requestAnimationFrame(sendFrame);
+      console.error("[PalmGuard] MediaPipe Hands initialized ✓");
+      setStatus("Camera live — palm landmark overlay active", "live");
+      log("MediaPipe Hands initialized ✓");
+    } catch (mpErr) {
+      const msg = "MediaPipe init error: " + mpErr.name + ": " + mpErr.message;
+      console.error("[PalmGuard]", msg);
+      showError(msg);
+      setStatus("Camera live — MediaPipe init failed (see error above)", "live");
+      log("ERROR: " + msg);
     }
   });
 
@@ -712,7 +784,6 @@
   setStep(1);
 
   log(`PalmGuard v1.0.0 — guest ${guestId.slice(0,8)}… — Start camera → Enroll → Verify`);
-  btnEnroll.disabled = false; // allow synthetic enroll without camera
 </script>
 </body>
 </html>
