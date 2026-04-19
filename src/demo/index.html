@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PalmGuard v1.0 — Standalone Palm Biometric Auth</title>
+  <title>PalmGuard v2.0 — Standalone Palm Biometric Auth</title>
   <meta http-equiv="Permissions-Policy" content="camera=(self)">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -13,7 +13,7 @@
   <!-- MediaPipe Hands (CDN, WASM) — must load before module scripts -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1156,10 +1156,6 @@
     try {
       mpHands = new Hands({ locateFile: f =>
         `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${f}` });
-      await mpHands.setOptions({
-        maxNumHands: 1, modelComplexity: 1,
-        minDetectionConfidence: 0.7, minTrackingConfidence: 0.5
-      });
       let autoVerifyDone = false;
       mpHands.onResults(r => {
         console.log('[PalmGuard] onResults called, landmarks:', r.multiHandLandmarks?.length ?? 0);
@@ -1189,6 +1185,11 @@
           btnVerify.disabled = false; // force-enable before click
           setTimeout(() => { btnVerify.disabled = false; btnVerify.click(); }, 600);
         }
+      });
+
+      await mpHands.setOptions({
+        maxNumHands: 1, modelComplexity: 1,
+        minDetectionConfidence: 0.7, minTrackingConfidence: 0.5
       });
 
       let firstFrame = true;
