@@ -1,15 +1,15 @@
 {
   "version": 2,
-  "buildCommand": "npm run build:demo",
-  "outputDirectory": "dist/demo",
+  "builds": [
+    { "src": "src/demo/index.html", "use": "@vercel/static" }
+  ],
+  "routes": [
+    { "src": "/(.*)", "dest": "src/demo/index.html" }
+  ],
   "headers": [
     {
       "source": "/(.*)",
       "headers": [
-        {
-          "key": "Content-Security-Policy",
-          "value": "default-src * 'unsafe-inline' 'unsafe-eval' blob: data:"
-        },
         {
           "key": "Permissions-Policy",
           "value": "camera=*"
