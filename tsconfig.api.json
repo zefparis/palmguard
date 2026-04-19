@@ -1,10 +1,10 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "module": "CommonJS",
-    "moduleResolution": "node",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "lib": ["ES2020", "DOM"],
-    "outDir": "dist/api",
+    "outDir": "dist",
     "rootDir": "src"
   },
   "include": [
