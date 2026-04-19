@@ -91,6 +91,7 @@ class SupabaseRepository implements PalmRepository {
   constructor(private readonly client: SupabaseClient) {}
 
   async enroll(record: EnrollRecord): Promise<void> {
+    console.log('[palmguard] enroll insert payload keys:', Object.keys(record));
     const { error } = await this.client.from("palm_enrollments").insert({
       tenant_id:          record.tenantId,
       user_id:            record.userId,
