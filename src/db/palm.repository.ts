@@ -100,7 +100,7 @@ class SupabaseRepository implements PalmRepository {
       public_key:          record.publicKey,
       kem_privkey_enc:     record.kemPrivkeyEnc,
       kek_iv:              record.kekIv,
-      captured_at:         record.capturedAt,
+      captured_at:         new Date(record.capturedAt).toISOString(),
       julian_day_number:   record.celestialJdn,
       capture_confidence:  record.captureConfidence ?? 1.0,
       template_version:    record.templateVersion ?? '1.0',
@@ -143,7 +143,7 @@ class SupabaseRepository implements PalmRepository {
       publicKey:          Buffer.from((data.public_key          as string).replace(/^\\x/, ""), "hex"),
       kemPrivkeyEnc:      Buffer.from((data.kem_privkey_enc     as string).replace(/^\\x/, ""), "hex"),
       kekIv:              Buffer.from((data.kek_iv              as string).replace(/^\\x/, ""), "hex"),
-      capturedAt:         data.captured_at          as number,
+      capturedAt:         new Date(data.captured_at as string).getTime(),
       celestialJdn:       data.julian_day_number    as number,
       templateVersion:    data.template_version     as string,
     };
