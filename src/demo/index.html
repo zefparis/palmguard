@@ -599,7 +599,8 @@
     (Math.floor(Date.now() / 86400000) + 2440587).toLocaleString();
 
   // ── State ────────────────────────────────────────────────────────────────────
-  let enrolled = null; // { fractal, tda, combined }
+  let enrolledVector = null; // { fractal, tda, combined }
+  const isEnrolled = () => !!enrolledVector;
   let mpHands = null;
   let lastLandmarks = null;
   let rafId = null;
@@ -991,10 +992,10 @@
 
   // ── Enroll ───────────────────────────────────────────────────────────────────────────
   btnEnroll.addEventListener("click", async () => {
-    console.log('[PalmGuard] Enroll clicked, enrolled:', !!enrolled, 'cameraRunning:', !!video.srcObject, 'lastLandmarks:', !!lastLandmarks);
+    console.log('[PalmGuard] Enroll clicked, enrolled:', isEnrolled(), 'cameraRunning:', !!video.srcObject, 'lastLandmarks:', !!lastLandmarks);
     if (urlMode === 'verify') return; // verify mode never runs the enroll flow
     // Re-enroll guard: if already enrolled, require confirmation
-    if (enrolled && btnEnroll.textContent.includes('Re-enroll')) {
+    if (enrolledVector && btnEnroll.textContent.includes('Re-enroll')) {
       if (!confirm('Re-enrolling will overwrite your current palm template. Continue?')) return;
     }
     btnEnroll.disabled = true;
@@ -1007,14 +1008,14 @@
       const useSyn = !video.srcObject;
       if (useSyn) log("No camera — using synthetic palm ROI");
       setStatus("Enrolling…", "processing");
-      enrolled = await captureMultiFrame(5, useSyn);
+      enrolledVector = await captureMultiFrame(5, useSyn);
       const enrolledAt = new Date().toISOString();
-      saveEnrollmentLocally(enrolled, enrolledAt);
+      saveEnrollmentLocally(enrolledVector, enrolledAt);
       navigator.vibrate?.([60, 40, 60]);
       log(`Enrollment complete — guest ${shortId}`);
       setStep(2);
       // Best-effort server-side persist (fire-and-forget)
-      const fractalBytes = serializeVector(enrolled.fractal.vector); // 24 bytes
+      const fractalBytes = serializeVector(enrolledVector.fractal.vector); // 24 bytes
       const palmVectorB64 = btoa(String.fromCharCode(...fractalBytes))
         .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
       fetch(`${API_BASE}/api/palm/enroll`, {
@@ -1044,16 +1045,16 @@
 
   // ── Verify ───────────────────────────────────────────────────────────────────────────
   btnVerify.addEventListener("click", async () => {
-    if (!enrolled) return;
+    if (!isEnrolled()) return;
     btnVerify.disabled = true;
     setStatus("Verifying…", "processing");
     navigator.vibrate?.([40]);
     try {
       const useSyn = !video.srcObject;
       const live = await runPipeline(useSyn);
-      const sim  = combinedSimilarity(enrolled.combined, live.combined);
-      const fSim = vectorSimilarity(enrolled.fractal.vector, live.fractal.vector);
-      const tSim = tdaVectorSimilarity(enrolled.tda, live.tda);
+      const sim  = combinedSimilarity(enrolledVector.combined, live.combined);
+      const fSim = vectorSimilarity(enrolledVector.fractal.vector, live.fractal.vector);
+      const tSim = tdaVectorSimilarity(enrolledVector.tda, live.tda);
       const match = sim >= SIMILARITY_THRESHOLD;
 
       // Animate the sim metric counter
@@ -1136,7 +1137,7 @@
     btnStart.disabled = true;
     btnEnroll.disabled = false;
     // In verify mode, ensure Verify is enabled regardless of prior state
-    if (urlMode === 'verify' && enrolled) btnVerify.disabled = false;
+    if (urlMode === 'verify' && isEnrolled()) btnVerify.disabled = false;
     camBadge.textContent = "LIVE";
     camWrap.classList.add("live");
     setStatus("Camera live — initializing MediaPipe…", "processing");
@@ -1176,9 +1177,9 @@
         }
         // Auto-verify on first confirmed hand detection in mode=verify
         if (urlMode === 'verify') {
-          console.log('[PalmGuard] mode=verify onResults — enrolled:', !!enrolled, 'landmarks:', !!lastLandmarks, 'autoVerifyDone:', autoVerifyDone, 'btnVerifyDisabled:', btnVerify.disabled);
+          console.log('[PalmGuard] mode=verify onResults — enrolled:', isEnrolled(), 'landmarks:', !!lastLandmarks, 'autoVerifyDone:', autoVerifyDone, 'btnVerifyDisabled:', btnVerify.disabled);
         }
-        if (urlMode === 'verify' && enrolled && lastLandmarks && !autoVerifyDone) {
+        if (urlMode === 'verify' && isEnrolled() && lastLandmarks && !autoVerifyDone) {
           autoVerifyDone = true;
           console.log('[PalmGuard] AUTO-VERIFY TRIGGERED — clicking btnVerify');
           setStatus("Hand detected — auto-verifying…", "processing");
@@ -1333,7 +1334,7 @@
     // 1. Try localStorage first (instant, no network)
     const localEnroll = loadEnrollmentLocally();
     if (localEnroll) {
-      enrolled = localEnroll;
+      enrolledVector = localEnroll;
       applyReturningUser(localEnroll.enrolledAt);
     }
 
@@ -1345,9 +1346,9 @@
 
     // mode=verify: hide Enroll; if no local enrollment, show error + back link
     if (urlMode === 'verify') {
-      console.log('[PalmGuard] mode=verify — enrolled:', !!enrolled, 'returnUrl:', returnUrl?.slice(0,40));
+      console.log('[PalmGuard] mode=verify — enrolled:', isEnrolled(), 'returnUrl:', returnUrl?.slice(0,40));
       btnEnroll.style.display = 'none';
-      if (!enrolled) {
+      if (!isEnrolled()) {
         console.log('[PalmGuard] mode=verify — NO local enrollment, showing error');
         setStatus("No enrollment found — please enroll first", "error");
         log("mode=verify but no local enrollment found");
@@ -1385,7 +1386,7 @@
       else if (i === n) el.classList.add("active");
     }
   }
-  setStep(enrolled ? 2 : 1);
+  setStep(isEnrolled() ? 2 : 1);
 
   log(`PalmGuard v1.0.0 — guest ${shortId} — ${isReturning ? 'returning user' : 'new session'}`);
 </script>
