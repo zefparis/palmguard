@@ -31,16 +31,18 @@ export interface BinaryImage {
 }
 
 export interface BoxCountResult {
-  /** Hausdorff fractal dimension, clamped to [1, 2]. */
+  /** Hausdorff fractal dimension, clamped to [1, 2]. Theil-Sen robust estimate. */
   dimension: number;
-  /** Pearson R² of the log-log linear regression. */
+  /** Pearson R² of the OLS log-log fit (quality metric, not used for D). */
   r2: number;
   /** Box sizes actually used (after degenerate filter). */
   scales: number[];
   /** N(r) for each scale (same length as scales). */
   counts: number[];
-  /** Lacunarity Λ = σ²/μ² at the median scale — texture heterogeneity. */
+  /** Lacunarity Λ = σ²/μ² at the smallest valid scale. */
   lacunarity: number;
+  /** Active pixels / (width × height) — line density. */
+  pixelDensity: number;
 }
 
 export interface PalmBiometricVector {
@@ -53,10 +55,15 @@ export interface PalmBiometricVector {
   /** Average lacunarity across all 4 lines. */
   globalLacunarity: number;
   /**
-   * Compact 6-scalar biometric vector for crypto encapsulation.
+   * Compact 6-scalar biometric vector for crypto encapsulation (API-compat, 24 bytes).
    * Layout: [D_heart, D_head, D_life, D_fate, intersectionDensity, globalLacunarity]
    */
   vector: Float64Array;
+  /**
+   * 12-scalar robust feature vector for biometric matching.
+   * Layout: [D, Λ, ρ] × 4 lines (heart, head, life, fate) = 12 floats.
+   */
+  featureVector: Float64Array;
 }
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
@@ -135,6 +142,28 @@ function linearRegression(
 }
 
 /**
+ * Theil-Sen robust slope estimator: median of all pairwise slopes.
+ * Resistant to outlier scales unlike OLS.
+ */
+function theilSenSlope(x: number[], y: number[]): number {
+  const slopes: number[] = [];
+  for (let i = 0; i < x.length; i++) {
+    for (let j = i + 1; j < x.length; j++) {
+      const dx = (x[j] ?? 0) - (x[i] ?? 0);
+      if (Math.abs(dx) > 1e-10) {
+        slopes.push(((y[j] ?? 0) - (y[i] ?? 0)) / dx);
+      }
+    }
+  }
+  if (slopes.length === 0) return 1;
+  slopes.sort((a, b) => a - b);
+  const mid = slopes.length >> 1;
+  return slopes.length % 2 === 1
+    ? (slopes[mid] ?? 1)
+    : ((slopes[mid - 1] ?? 0) + (slopes[mid] ?? 0)) / 2;
+}
+
+/**
  * Compute lacunarity Λ = σ²/μ² at a given box size.
  * High Λ → heterogeneous / gapped texture (characteristic of real palm lines).
  * Low Λ → homogeneous fill.
@@ -193,24 +222,12 @@ export function boxCountDimension(
   const effectiveMax = maxBoxSize ?? Math.floor(minDim / 2);
 
   if (effectiveMax < minBoxSize) {
-    return { dimension: 1.0, r2: 0, scales: [], counts: [], lacunarity: 0 };
+    return { dimension: 1.0, r2: 0, scales: [], counts: [], lacunarity: 0, pixelDensity: 0 };
   }
 
-  // Build scale sequence: powers of 2 between minBoxSize and effectiveMax.
-  const scales: number[] = [];
-  let r = minBoxSize;
-  while (r <= effectiveMax) {
-    scales.push(r);
-    r *= 2;
-  }
-  // Guarantee ≥ 4 scales for a reliable regression.
-  if (scales.length < 4) {
-    scales.length = 0;
-    const step = Math.max(1, Math.floor((effectiveMax - minBoxSize) / 7));
-    for (let s = minBoxSize; s <= effectiveMax; s += step) {
-      scales.push(s);
-    }
-  }
+  // Fixed multi-scale set: [2, 4, 8, 16, 32, 64] per spec.
+  const FIXED_SCALES = [2, 4, 8, 16, 32, 64];
+  const scales = FIXED_SCALES.filter((s) => s >= minBoxSize && s <= effectiveMax);
 
   const rawCounts = scales.map((s) => countBoxes(img, s));
 
@@ -219,16 +236,23 @@ export function boxCountDimension(
     .map((s, i) => ({ s, c: rawCounts[i] ?? 0 }))
     .filter((p) => p.c > 0);
 
+  // Pixel density: active pixels / total pixels (line coverage)
+  const totalPx     = img.width * img.height;
+  const activePx    = img.data.reduce((a, v) => a + (v > 0 ? 1 : 0), 0);
+  const pixelDensity = totalPx > 0 ? activePx / totalPx : 0;
+
   if (valid.length < 2) {
-    return { dimension: 1.0, r2: 0, scales, counts: rawCounts, lacunarity: 0 };
+    return { dimension: 1.0, r2: 0, scales, counts: rawCounts, lacunarity: 0, pixelDensity };
   }
 
   // log(1/r) on x-axis, log N(r) on y-axis — slope = D.
   const logInvR = valid.map((p) => Math.log(1 / p.s));
   const logN = valid.map((p) => Math.log(p.c));
 
-  const { slope, r2 } = linearRegression(logInvR, logN);
+  // Theil-Sen robust slope = D; OLS R² kept as quality metric only
+  const slope     = theilSenSlope(logInvR, logN);
   const dimension = Math.max(1.0, Math.min(2.0, slope));
+  const { r2 }   = linearRegression(logInvR, logN);
 
   // Lacunarity at the smallest valid scale: maximises box-to-box variance,
   // correctly distinguishing regular-sparse (Λ >> 0) from uniform-dense (Λ ≈ 0).
@@ -242,6 +266,7 @@ export function boxCountDimension(
     scales: valid.map((p) => p.s),
     counts: valid.map((p) => p.c),
     lacunarity,
+    pixelDensity,
   };
 }
 
@@ -300,6 +325,13 @@ export function computePalmVector(
     globalLacunarity,
   ]);
 
+  const featureVector = new Float64Array([
+    heartResult.dimension, heartResult.lacunarity, heartResult.pixelDensity,
+    headResult.dimension,  headResult.lacunarity,  headResult.pixelDensity,
+    lifeResult.dimension,  lifeResult.lacunarity,  lifeResult.pixelDensity,
+    fateResult.dimension,  fateResult.lacunarity,  fateResult.pixelDensity,
+  ]);
+
   return {
     heart: heartResult,
     head: headResult,
@@ -308,6 +340,7 @@ export function computePalmVector(
     intersectionDensity,
     globalLacunarity,
     vector,
+    featureVector,
   };
 }
 
@@ -327,17 +360,18 @@ export function vectorSimilarity(a: Float64Array, b: Float64Array): number {
       `Vector length mismatch: ${a.length} vs ${b.length}`
     );
 
-  let dot = 0,
-    normA = 0,
-    normB = 0;
+  let dot = 0, normA = 0, normB = 0, l2sq = 0;
   for (let i = 0; i < a.length; i++) {
-    dot += (a[i] ?? 0) * (b[i] ?? 0);
-    normA += (a[i] ?? 0) ** 2;
-    normB += (b[i] ?? 0) ** 2;
+    const ai = a[i] ?? 0, bi = b[i] ?? 0;
+    dot   += ai * bi;
+    normA += ai ** 2;
+    normB += bi ** 2;
+    l2sq  += (ai - bi) ** 2;
   }
 
   if (normA === 0 || normB === 0) return 0;
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+  const cosine = dot / (Math.sqrt(normA) * Math.sqrt(normB));
+  return 0.6 * cosine + 0.4 * (1 / (1 + Math.sqrt(l2sq)));
 }
 
 /**

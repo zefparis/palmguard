@@ -105,11 +105,11 @@ export interface VerifyResult {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-/** Cosine similarity threshold for authentication. */
-export const SIMILARITY_THRESHOLD = 0.92;
+/** Hybrid similarity threshold for authentication (0.6×cosine + 0.4×1/(1+L2)). */
+export const SIMILARITY_THRESHOLD = 0.97;
 
-/** Combined vector dimension: 6 (fractal) + 32 (TDA). */
-export const COMBINED_DIM = 38;
+/** Combined vector dimension: 12 (fractal) + 18 (angles) + 12 (Hu) + 32 (TDA). */
+export const COMBINED_DIM = 74;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -130,32 +130,41 @@ function fromBase64Url(s: string): Uint8Array {
 import { createHash } from "crypto";
 
 /**
- * Build the 38-float combined biometric vector from fractal + TDA components.
- * Fractal Float64 values are cast to Float32 (precision is sufficient for cosine).
+ * Build the 74-float combined biometric vector.
+ * Layout: [fractal_robust(12) | angles(18) | hu_moments(12) | tda(32)]
+ * angleVec and huVec are optional: server-side pipeline has no landmark data.
  */
 export function buildCombinedVector(
   fractal: PalmBiometricVector,
-  tda: TDAVector
+  tda: TDAVector,
+  angleVec?: Float32Array,
+  huVec?: Float32Array
 ): Float32Array {
-  const v = new Float32Array(COMBINED_DIM);
-  for (let i = 0; i < 6; i++) v[i] = fractal.vector[i] ?? 0;
-  for (let i = 0; i < 32; i++) v[6 + i] = tda[i] ?? 0;
+  const v  = new Float32Array(COMBINED_DIM);
+  const fv = fractal.featureVector ?? fractal.vector;
+  for (let i = 0; i < Math.min(12, fv.length); i++) v[i]      = fv[i]       ?? 0;
+  if (angleVec) for (let i = 0; i < 18; i++)         v[12 + i] = angleVec[i] ?? 0;
+  if (huVec)    for (let i = 0; i < 12; i++)         v[30 + i] = huVec[i]    ?? 0;
+  for (let i = 0; i < 32; i++)                        v[42 + i] = tda[i]      ?? 0;
   return v;
 }
 
 /**
- * Cosine similarity between two Float32Arrays.
+ * Hybrid cosine + L2 similarity: 0.6 × cosine + 0.4 × 1/(1+L2).
  */
 export function combinedSimilarity(a: Float32Array, b: Float32Array): number {
   if (a.length !== b.length) throw new RangeError("Combined vector length mismatch");
-  let dot = 0, nA = 0, nB = 0;
+  let dot = 0, nA = 0, nB = 0, l2sq = 0;
   for (let i = 0; i < a.length; i++) {
-    dot += (a[i] ?? 0) * (b[i] ?? 0);
-    nA += (a[i] ?? 0) ** 2;
-    nB += (b[i] ?? 0) ** 2;
+    const ai = a[i] ?? 0, bi = b[i] ?? 0;
+    dot  += ai * bi;
+    nA   += ai ** 2;
+    nB   += bi ** 2;
+    l2sq += (ai - bi) ** 2;
   }
   if (nA === 0 || nB === 0) return 0;
-  return dot / (Math.sqrt(nA) * Math.sqrt(nB));
+  const cosine = dot / (Math.sqrt(nA) * Math.sqrt(nB));
+  return 0.6 * cosine + 0.4 * (1 / (1 + Math.sqrt(l2sq)));
 }
 
 // ─── Pipeline ─────────────────────────────────────────────────────────────────

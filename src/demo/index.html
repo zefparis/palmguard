@@ -851,14 +851,79 @@
     }
   }
 
-  // ── Geometry vector — 12 inter-landmark distances, normalised by hand size ───
-  const GEO_PAIRS = [[0,5],[0,9],[0,13],[0,17],[5,9],[9,13],[13,17],[5,17],[1,5],[1,17],[9,0],[5,13]];
+  // ── Procrustes alignment ────────────────────────────────────────────
+  function alignLandmarks(lm) {
+    if (!lm || lm.length < 21) return lm;
+    // Translate: wrist → origin
+    const ox = lm[0].x, oy = lm[0].y;
+    let pts = lm.map(p => ({ x: p.x - ox, y: p.y - oy }));
+    // Scale: wrist→middle-base = 1.0
+    const refDist = Math.hypot(pts[9].x, pts[9].y) || 1;
+    pts = pts.map(p => ({ x: p.x / refDist, y: p.y / refDist }));
+    // Rotate: align wrist→middle-base to vertical axis (0, 1)
+    const theta = Math.atan2(pts[9].x, pts[9].y); // angle from (0,1) to ref
+    const c = Math.cos(-theta), s = Math.sin(-theta);
+    return pts.map(p => ({ x: p.x * c - p.y * s, y: p.x * s + p.y * c }));
+  }
 
-  function computeGeoVector(lms) {
-    if (!lms || lms.length < 21) return null;
-    const d = (a, b) => Math.hypot(lms[a].x - lms[b].x, lms[a].y - lms[b].y);
-    const handSize = d(0, 9) || 1; // wrist-to-middle-base
-    return Float32Array.from(GEO_PAIRS.map(([a, b]) => d(a, b) / handSize));
+  // ── 18 Procrustes-stable angle features ───────────────────────────────
+  function computeAngleFeatures(lm) {
+    if (!lm || lm.length < 21) return new Float32Array(18).fill(0);
+    const angle3 = (a, b, c) => {
+      const v1x = a.x - b.x, v1y = a.y - b.y;
+      const v2x = c.x - b.x, v2y = c.y - b.y;
+      const n1 = Math.hypot(v1x, v1y), n2 = Math.hypot(v2x, v2y);
+      if (n1 < 1e-9 || n2 < 1e-9) return 0;
+      return Math.acos(Math.max(-1, Math.min(1, (v1x*v2x + v1y*v2y) / (n1*n2))));
+    };
+    // Finger joint chains: [base, MCP, PIP, DIP, TIP]
+    const F = [[0,1,2,3,4],[0,5,6,7,8],[0,9,10,11,12],[0,13,14,15,16],[0,17,18,19,20]];
+    const a = new Float32Array(18);
+    let i = 0;
+    for (const f of F) {
+      a[i++] = angle3(lm[f[0]], lm[f[1]], lm[f[2]]); // base–MCP–PIP
+      a[i++] = angle3(lm[f[1]], lm[f[2]], lm[f[3]]); // MCP–PIP–DIP
+      a[i++] = angle3(lm[f[2]], lm[f[3]], lm[f[4]]); // PIP–DIP–TIP
+    }
+    a[i++] = angle3(lm[5],  lm[0],  lm[17]); // palm arch: index_mcp–wrist–pinky_mcp
+    a[i++] = angle3(lm[5],  lm[9],  lm[17]); // palm arch: index_mcp–middle_mcp–pinky_mcp
+    a[i++] = angle3(lm[1],  lm[0],  lm[17]); // palm arch: thumb_cmc–wrist–pinky_mcp
+    return a;
+  }
+
+  // ── Hu moments — 3 invariants × 4 quadrants = 12 features ─────────────────
+  function computeHuMoments(gray, W, H) {
+    const hu = new Float32Array(12);
+    const hw = W >> 1, hh = H >> 1;
+    const quads = [[0,0,hw,hh],[hw,0,W,hh],[0,hh,hw,H],[hw,hh,W,H]];
+    for (let qi = 0; qi < 4; qi++) {
+      const [x0,y0,x1,y1] = quads[qi];
+      let m00=0, m10=0, m01=0;
+      for (let y=y0; y<y1; y++) for (let x=x0; x<x1; x++) {
+        const v = gray[y*W+x]/255;
+        m00+=v; m10+=x*v; m01+=y*v;
+      }
+      if (m00 < 1e-9) continue;
+      const cx = m10/m00, cy = m01/m00;
+      let mu20=0, mu02=0, mu11=0, mu30=0, mu12=0, mu21=0, mu03=0;
+      for (let y=y0; y<y1; y++) {
+        const dy = y - cy;
+        for (let x=x0; x<x1; x++) {
+          const dx = x - cx, v = gray[y*W+x]/255;
+          mu20+=dx*dx*v; mu02+=dy*dy*v; mu11+=dx*dy*v;
+          mu30+=dx*dx*dx*v; mu12+=dx*dy*dy*v; mu21+=dx*dx*dy*v; mu03+=dy*dy*dy*v;
+        }
+      }
+      const eta = (p,q,mu) => mu / (Math.pow(m00,(p+q)/2+1)+1e-12);
+      const e20=eta(2,0,mu20), e02=eta(0,2,mu02), e11=eta(1,1,mu11);
+      const e30=eta(3,0,mu30), e12=eta(1,2,mu12), e21=eta(2,1,mu21), e03=eta(0,3,mu03);
+      const h1 = e20+e02;
+      const h2 = (e20-e02)**2 + 4*e11**2;
+      const h3 = (e30-3*e12)**2 + (3*e21-e03)**2;
+      const logAbs = v => (v===0||!isFinite(v)) ? -10 : Math.max(-10, Math.log10(Math.abs(v)));
+      hu[qi*3]=logAbs(h1); hu[qi*3+1]=logAbs(h2); hu[qi*3+2]=logAbs(h3);
+    }
+    return hu;
   }
 
   // ── Core pipeline ─────────────────────────────────────────────────────────────
@@ -892,15 +957,36 @@
     setMetric("m-betti", `β0=${diagram.betti0} β1=${diagram.betti1}`);
     log(`TDA done — ${diagram.pairs.length} pairs, β0=${diagram.betti0}, β1=${diagram.betti1}`);
 
-    const geoVec  = computeGeoVector(lastLandmarks);
-    const combined = buildCombinedVector(fractalResult, tdaVec, geoVec);
+    const alignedLm = alignLandmarks(lastLandmarks);
+    const angleVec  = computeAngleFeatures(alignedLm);
+    const huVec     = computeHuMoments(roi, 256, 256);
+    const combined  = buildCombinedVector(fractalResult, tdaVec, angleVec, huVec);
     const ms = Math.round(performance.now() - t0);
     setMetric("m-latency", `${ms}ms`, ms < 500 ? "green" : ms < 1500 ? "amber" : "red");
-    const geoStr = geoVec ? `[${Array.from(geoVec).map(v => v.toFixed(3)).join(", ")}]` : "null (no landmarks)";
-    log(`Geo vector (12): ${geoStr}`);
+    log(`Angles(18): [${Array.from(angleVec).slice(0,6).map(v=>v.toFixed(3)).join(',')}…]`);
     log(`Pipeline done in ${ms}ms — vector dim: ${combined.length}`);
 
-    return { fractal: fractalResult, tda: tdaVec, geoVec, combined, diagram };
+    return { fractal: fractalResult, tda: tdaVec, angleVec, huVec, combined, diagram };
+  }
+
+  // ── Multi-frame median capture (5 frames → component-wise median) ────────────
+  async function captureMultiFrame(n, useSyn) {
+    const frames = [];
+    for (let i = 0; i < n; i++) {
+      setStatus(`Capturing frame ${i+1}/${n}…`, "processing");
+      frames.push(await runPipeline(useSyn));
+      if (i < n-1) await new Promise(r => setTimeout(r, 150));
+    }
+    // Component-wise median — robust to outlier frames
+    const dim = frames[0].combined.length;
+    const combined = new Float32Array(dim);
+    for (let j = 0; j < dim; j++) {
+      const vals = frames.map(f => f.combined[j]).sort((a,b) => a-b);
+      const mid = n >> 1;
+      combined[j] = n % 2 === 1 ? vals[mid] : (vals[mid-1]+vals[mid])/2;
+    }
+    log(`Multi-frame capture: ${n} frames, median dim ${dim}`);
+    return { ...frames[Math.floor(n/2)], combined };
   }
 
   // ── Enroll ───────────────────────────────────────────────────────────────────────────
@@ -919,7 +1005,7 @@
       const useSyn = !video.srcObject;
       if (useSyn) log("No camera — using synthetic palm ROI");
       setStatus("Enrolling…", "processing");
-      enrolled = await runPipeline(useSyn);
+      enrolled = await captureMultiFrame(5, useSyn);
       const enrolledAt = new Date().toISOString();
       saveEnrollmentLocally(enrolled, enrolledAt);
       navigator.vibrate?.([60, 40, 60]);
@@ -1113,8 +1199,10 @@
   function saveEnrollmentLocally(e, enrolledAt) {
     try {
       localStorage.setItem(LS_ENROLLED, JSON.stringify({
-        combined:      Array.from(e.combined),
-        fractalVector: Array.from(e.fractal.vector),
+        version: 'v2',
+        combined:             Array.from(e.combined),
+        fractalVector:        Array.from(e.fractal.vector),
+        fractalFeatureVector: Array.from(e.fractal.featureVector ?? e.fractal.vector),
         fractalD: {
           heart: e.fractal.heart.dimension,
           head:  e.fractal.head.dimension,
@@ -1132,18 +1220,22 @@
       const raw = localStorage.getItem(LS_ENROLLED);
       if (!raw) return null;
       const d = JSON.parse(raw);
+      // Version guard: reject old-format enrollments (wrong vector dim)
+      if (d.version !== 'v2' || !d.combined || d.combined.length !== 74) return null;
       return {
         combined: Float32Array.from(d.combined),
         fractal: {
-          vector: Float32Array.from(d.fractalVector),
+          vector:        Float64Array.from(d.fractalVector),
+          featureVector: Float64Array.from(d.fractalFeatureVector ?? d.fractalVector),
           heart:  { dimension: d.fractalD.heart },
           head:   { dimension: d.fractalD.head },
           life:   { dimension: d.fractalD.life },
           fate:   { dimension: d.fractalD.fate },
         },
         tda:     Float32Array.from(d.tda),
-        geoVec:  null,
-        diagram: null,
+        angleVec: null,
+        huVec:    null,
+        diagram:  null,
         enrolledAt: d.enrolledAt,
       };
     } catch (_) { return null; }
