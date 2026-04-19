@@ -1166,6 +1166,16 @@
         const rect = video.getBoundingClientRect();
         drawLandmarks(lastLandmarks, rect.width || 640, rect.height || 480);
         setHandDetected(!!lastLandmarks, score);
+        // No hand: clear skeleton canvas and show waiting state
+        if (!lastLandmarks) {
+          skelCtx.fillStyle = '#000';
+          skelCtx.fillRect(0, 0, skelC.width, skelC.height);
+          skelCtx.fillStyle = 'rgba(100,116,139,0.7)';
+          skelCtx.font = '12px monospace';
+          skelCtx.textAlign = 'center';
+          skelCtx.fillText('waiting for hand\u2026', skelC.width / 2, skelC.height / 2);
+          skelCtx.textAlign = 'left';
+        }
         // Auto-verify on first confirmed hand detection in mode=verify
         if (urlMode === 'verify' && enrolled && lastLandmarks && !autoVerifyDone) {
           autoVerifyDone = true;
