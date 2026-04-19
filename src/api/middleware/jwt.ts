@@ -173,6 +173,20 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   // ── Path 1: X-Internal-Token ──────────────────────────────────────────────
   const internalToken = req.headers["x-internal-token"] as string | undefined;
   if (internalToken !== undefined) {
+    // ── Path 1a: optional public-demo bypass (PALMGUARD_DEMO_TOKEN env var) ──
+    // Set PALMGUARD_DEMO_TOKEN=demo on the server to allow the standalone demo
+    // to call the API without exposing HCS_TOKEN_SECRET.
+    const demoToken = process.env["PALMGUARD_DEMO_TOKEN"];
+    if (demoToken && internalToken === demoToken) {
+      const bodyUserId   = (req.body as Record<string, unknown> | undefined)?.["userId"];
+      const paramsUserId = req.params["userId"];
+      res.locals["userId"]   = (typeof bodyUserId === "string" ? bodyUserId : paramsUserId) ?? "demo-user";
+      res.locals["authMode"] = "demo";
+      next();
+      return;
+    }
+
+    // ── Path 1b: timing-safe compare against HCS_TOKEN_SECRET ────────────────
     const secretBuf = Buffer.from(secret, "utf8");
     const tokenBuf  = Buffer.alloc(secretBuf.length, 0);
     Buffer.from(internalToken, "utf8").copy(tokenBuf);
