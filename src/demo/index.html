@@ -10,8 +10,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 
-  <!-- MediaPipe tasks-vision (CDN, WASM) — stable 2023+ API -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js" crossorigin="anonymous"></script>
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1530,9 +1528,23 @@ function combinedSimilarity(a, b) {
     setStatus("Camera live — initializing MediaPipe…", "processing");
     log("Camera stream started");
 
-    // ── MediaPipe tasks-vision HandLandmarker ──
-    if (typeof HandLandmarker === "undefined" || typeof FilesetResolver === "undefined") {
-      const msg = "MediaPipe tasks-vision not loaded — vision_bundle.js CDN script failed (CSP or network error).";
+    // ── MediaPipe tasks-vision HandLandmarker (dynamic import — avoids ESM/classic-script conflict) ──
+    console.error("[PalmGuard] Loading MediaPipe tasks-vision via dynamic import…");
+    let HandLandmarker, FilesetResolver;
+    try {
+      const mpv = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/vision_bundle.js");
+      HandLandmarker  = mpv.HandLandmarker;
+      FilesetResolver = mpv.FilesetResolver;
+    } catch (importErr) {
+      const msg = "MediaPipe tasks-vision CDN import failed: " + importErr.message;
+      console.error("[PalmGuard]", msg);
+      showError(msg);
+      setStatus("Camera live — MediaPipe failed to load", "live");
+      log("ERROR: " + msg);
+      return;
+    }
+    if (!HandLandmarker || !FilesetResolver) {
+      const msg = "MediaPipe tasks-vision: HandLandmarker/FilesetResolver not exported by bundle.";
       console.error("[PalmGuard]", msg);
       showError(msg);
       setStatus("Camera live — MediaPipe failed to load", "live");
@@ -1540,10 +1552,10 @@ function combinedSimilarity(a, b) {
       return;
     }
 
-    console.error("[PalmGuard] tasks-vision found, creating HandLandmarker…");
+    console.error("[PalmGuard] tasks-vision loaded, creating HandLandmarker…");
     try {
       const vision = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm"
       );
       const handLandmarker = await HandLandmarker.createFromOptions(vision, {
         baseOptions: {
