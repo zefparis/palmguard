@@ -991,6 +991,7 @@
 
   // ── Enroll ───────────────────────────────────────────────────────────────────────────
   btnEnroll.addEventListener("click", async () => {
+    if (urlMode === 'verify') return; // verify mode never runs the enroll flow
     // Re-enroll guard: if already enrolled, require confirmation
     if (enrolled && btnEnroll.textContent.includes('Re-enroll')) {
       if (!confirm('Re-enrolling will overwrite your current palm template. Continue?')) return;
@@ -1009,12 +1010,7 @@
       const enrolledAt = new Date().toISOString();
       saveEnrollmentLocally(enrolled, enrolledAt);
       navigator.vibrate?.([60, 40, 60]);
-      setStatus("Enrolled ✓ — press Verify to authenticate", "live");
       log(`Enrollment complete — guest ${shortId}`);
-      btnVerify.disabled = false;
-      btnVerify.className = 'btn-cyan';
-      btnEnroll.textContent = 'Re-enroll';
-      btnEnroll.className   = 'btn-danger';
       setStep(2);
       // Best-effort server-side persist (fire-and-forget)
       const fractalBytes = serializeVector(enrolled.fractal.vector); // 24 bytes
@@ -1025,6 +1021,19 @@
         headers: { 'X-Internal-Token': DEMO_TOKEN, 'Content-Type': 'application/json' },
         body: JSON.stringify({ tenantId: DEMO_TENANT, palmVectorB64, capturedAt: Date.now() })
       }).catch(() => {});
+      // In enroll mode redirect back to caller immediately after persist
+      if (urlMode === 'enroll' && returnUrl) {
+        setStatus("Enrolled ✓ — returning to application…", "live");
+        setTimeout(() => {
+          window.location.href = returnUrl + '?palm_verified=1&score=1';
+        }, 2000);
+        return;
+      }
+      setStatus("Enrolled ✓ — press Verify to authenticate", "live");
+      btnVerify.disabled = false;
+      btnVerify.className = 'btn-cyan';
+      btnEnroll.textContent = 'Re-enroll';
+      btnEnroll.className   = 'btn-danger';
     } catch (e) {
       setStatus("Enrollment failed: " + e.message, "error");
       log("ERROR: " + e.message);
@@ -1148,12 +1157,19 @@
         maxNumHands: 1, modelComplexity: 1,
         minDetectionConfidence: 0.7, minTrackingConfidence: 0.5
       });
+      let autoVerifyDone = false;
       mpHands.onResults(r => {
         lastLandmarks = r.multiHandLandmarks?.[0] ?? null;
         const score = r.multiHandedness?.[0]?.score ?? null;
         const rect = video.getBoundingClientRect();
         drawLandmarks(lastLandmarks, rect.width || 640, rect.height || 480);
         setHandDetected(!!lastLandmarks, score);
+        // Auto-verify on first confirmed hand detection in mode=verify
+        if (urlMode === 'verify' && enrolled && lastLandmarks && !autoVerifyDone && !btnVerify.disabled) {
+          autoVerifyDone = true;
+          setStatus("Hand detected — auto-verifying…", "processing");
+          setTimeout(() => { if (!btnVerify.disabled) btnVerify.click(); }, 600);
+        }
       });
 
       let firstFrame = true;
@@ -1175,13 +1191,8 @@
       };
       rafId = requestAnimationFrame(sendFrame);
       console.error("[PalmGuard] MediaPipe Hands initialized ✓");
-      setStatus("Camera live — palm landmark overlay active", "live");
+      setStatus("Camera live — hold your palm in view", "live");
       log("MediaPipe Hands initialized ✓");
-      // Auto-verify in mode=verify once landmarks are flowing
-      if (urlMode === 'verify' && enrolled && !btnVerify.disabled) {
-        setStatus("Auto-verify… hold your palm steady", "processing");
-        setTimeout(() => { if (!btnVerify.disabled) btnVerify.click(); }, 1200);
-      }
     } catch (mpErr) {
       const msg = "MediaPipe init error: " + mpErr.name + ": " + mpErr.message;
       console.error("[PalmGuard]", msg);
@@ -1304,6 +1315,25 @@
     if (urlMode === 'enroll') {
       btnVerify.style.display = 'none';
       btnEnroll.focus();
+    }
+
+    // mode=verify: hide Enroll; if no local enrollment, show error + back link
+    if (urlMode === 'verify') {
+      btnEnroll.style.display = 'none';
+      if (!enrolled) {
+        setStatus("No enrollment found — please enroll first", "error");
+        log("mode=verify but no local enrollment found");
+        if (returnUrl) {
+          const backBtn = document.createElement('button');
+          backBtn.textContent = 'Go back to enroll';
+          backBtn.className = 'btn-primary';
+          backBtn.style.marginTop = '12px';
+          backBtn.onclick = () => {
+            window.location.href = returnUrl + '?palm_error=no_enrollment';
+          };
+          document.querySelector('.btn-row').appendChild(backBtn);
+        }
+      }
     }
 
     // 2. Background server check (may confirm or supplement localStorage)
