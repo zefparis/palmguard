@@ -76,8 +76,10 @@ export function createPalmRoutes({ repo, limiter }: RouteDeps): Router {
     "/enroll",
     requireAuth,
     async (req: Request, res: Response<EnrollResponse | ApiError>) => {
-      const start  = res.locals["startMs"] as number ?? Date.now();
-      const userId = res.locals["userId"]  as string;
+      const start    = res.locals["startMs"]  as number ?? Date.now();
+      const userId   = res.locals["userId"]   as string;
+      const authMode = res.locals["authMode"] as string; // 'demo' | 'internal' | 'jwt'
+      const isDemo   = authMode === "demo";
       let statusCode = 201;
       let body: EnrollResponse | ApiError;
 
@@ -94,13 +96,14 @@ export function createPalmRoutes({ repo, limiter }: RouteDeps): Router {
             statusCode = 400;
             body = { success: false, code: "INVALID_VECTOR", message: "palmVectorB64 must decode to exactly 24 bytes" };
           } else {
-            const rl = await limiter.checkEnroll(userId);
+            // Demo mode: skip rate-limit entirely
+            const rl = isDemo ? { allowed: true, retryAfterSecs: 0 } : await limiter.checkEnroll(userId);
             if (!rl.allowed) {
               statusCode = 429;
               body = { success: false, code: "RATE_LIMIT_EXCEEDED", message: `Enroll limit reached. Retry after ${rl.retryAfterSecs}s` };
               res.setHeader("Retry-After", String(rl.retryAfterSecs));
             } else {
-              await limiter.recordEnroll(userId);
+              if (!isDemo) await limiter.recordEnroll(userId);
 
               const celestialSalt = deriveCelestialSalt(reqBody.capturedAt);
               const contentHash   = createHash("sha256").update(biometricBytes).update(celestialSalt.bytes).digest("hex");
@@ -115,9 +118,10 @@ export function createPalmRoutes({ repo, limiter }: RouteDeps): Router {
               const vaultEntry = await encryptPrivateKey(kek, privateKey);
               void serializeVaultEntry(vaultEntry); // ensure the vault blob is always computable
 
+              // Demo mode: silently replace any prior enrollment (avoids 409 CONFLICT)
+              if (isDemo) await repo.deleteEnrollment(reqBody.tenantId, userId).catch(() => {});
+
               // Persist to Supabase
-              // Note: template.ciphertext / template.publicKey are base64url strings (PalmTemplate
-              // contract). We use the raw Uint8Array values from the encapsulation step directly.
               await repo.enroll({
                 tenantId:           reqBody.tenantId,
                 userId,
