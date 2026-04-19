@@ -1534,9 +1534,9 @@ function combinedSimilarity(a, b) {
     try {
       let mpv;
       try {
-        mpv = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.js");
+        mpv = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/vision_bundle.js");
       } catch (_) {
-        mpv = await import("https://unpkg.com/@mediapipe/tasks-vision@0.10.14/vision_bundle.js");
+        mpv = await import("https://unpkg.com/@mediapipe/tasks-vision@0.10.3/vision_bundle.js");
       }
       HandLandmarker  = mpv.HandLandmarker;
       FilesetResolver = mpv.FilesetResolver;
@@ -1560,7 +1560,7 @@ function combinedSimilarity(a, b) {
     console.error("[PalmGuard] tasks-vision loaded, creating HandLandmarker…");
     try {
       const vision = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
       );
       const handLandmarker = await HandLandmarker.createFromOptions(vision, {
         baseOptions: {
@@ -1801,7 +1801,7 @@ function combinedSimilarity(a, b) {
   }
   setStep(isEnrolled() ? 2 : 1);
 
-  log(`PalmGuard v1.0.0 — guest ${shortId} — ${isReturning ? 'returning user' : 'new session'}`);
+  log(`PalmGuard v2.0.0 — guest ${shortId} — ${isReturning ? 'returning user' : 'new session'}`);
 </script>
 </body>
 </html>
