@@ -1,10 +1,11 @@
 import express, { type Express } from "express";
 import cors from "cors";
 import { createPalmRoutes } from "./routes.js";
-import { rateLimiter } from "./ratelimit.js";
-import { createPalmRepositorySync } from "../db/palm.repository.js";
+import { rateLimiter, createRateLimiter } from "./ratelimit.js";
+import { createPalmRepositorySync, createPalmRepository } from "../db/palm.repository.js";
 import type { PalmRepository } from "../db/types.js";
 import type { RateLimiter } from "./ratelimit.js";
+import { config } from "../config.js";
 
 const ALLOWED_ORIGINS = [
   "https://hcs-u7.online",
@@ -27,6 +28,17 @@ export interface AppDeps {
  *   - Rate limit reset: tests call rateLimiter._resetForTesting() on the exported singleton,
  *     which is the same instance used by default — so resets propagate correctly.
  */
+/**
+ * Production async factory — wires real SupabaseRepository + correct RateLimiter.
+ * Call this from start.ts. Tests use createApp(deps) with injected mocks instead.
+ */
+export async function createAppAsync(): Promise<Express> {
+  const repo    = await createPalmRepository(null, config.supabaseUrl, config.supabaseServiceKey);
+  const limiter = createRateLimiter(config.rateLimiterMode, config.supabaseUrl, config.supabaseServiceKey);
+  console.log('[palmguard] createAppAsync: repo=%s limiter=%s', repo.constructor.name, limiter.constructor.name);
+  return createApp({ repo, limiter });
+}
+
 export function createApp(overrides?: AppDeps): Express {
   const repo    = overrides?.repo    ?? createPalmRepositorySync();
   const limiter = overrides?.limiter ?? rateLimiter; // singleton for backward compat
