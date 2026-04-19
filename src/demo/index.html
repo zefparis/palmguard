@@ -741,7 +741,7 @@
     let stream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" }
+        video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: { ideal: "environment" } }
       });
       console.error("[PalmGuard] getUserMedia GRANTED — tracks:", stream.getVideoTracks().map(t => t.label).join(", "));
     } catch (e) {
