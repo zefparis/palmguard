@@ -10,6 +10,7 @@ import { config } from "../config.js";
 const ALLOWED_ORIGINS = [
   "https://hcs-u7.online",
   "https://app.hcs-u7.org",
+  "https://palmguard-three.vercel.app",
   "http://localhost:3000",
   "http://localhost:5174",
 ];

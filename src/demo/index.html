@@ -564,7 +564,7 @@
 <footer>PalmGuard v1.0.0 · Standalone · ML-KEM-768 Post-Quantum · IA-SOLUTION</footer>
 
 <script type="module">
-  import { computePalmVector, vectorSimilarity } from "/src/fractal/boxcount.js";
+  import { computePalmVector, vectorSimilarity, serializeVector } from "/src/fractal/boxcount.js";
   import { skeletonize, linesToBinaryImages } from "/src/topology/skeleton.js";
   import { computePersistence, diagramToVector, tdaVectorSimilarity } from "/src/topology/tda.js";
   import { buildCombinedVector, combinedSimilarity, SIMILARITY_THRESHOLD } from "./palm-browser.js";
@@ -1016,11 +1016,14 @@
       btnEnroll.textContent = 'Re-enroll';
       btnEnroll.className   = 'btn-danger';
       setStep(2);
-      // Best-effort server-side persist
-      fetch(`${API_BASE}/api/enroll`, {
+      // Best-effort server-side persist (fire-and-forget)
+      const fractalBytes = serializeVector(enrolled.fractal.vector); // 24 bytes
+      const palmVectorB64 = btoa(String.fromCharCode(...fractalBytes))
+        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      fetch(`${API_BASE}/api/palm/enroll`, {
         method: 'POST',
         headers: { 'X-Internal-Token': DEMO_TOKEN, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: guestId, vector: Array.from(enrolled.combined) })
+        body: JSON.stringify({ tenantId: DEMO_TENANT, palmVectorB64, capturedAt: Date.now() })
       }).catch(() => {});
     } catch (e) {
       setStatus("Enrollment failed: " + e.message, "error");
