@@ -1318,7 +1318,16 @@ function combinedSimilarity(a, b) {
     return hu;
   }
 
-  // ── Core pipeline ─────────────────────────────────────────────────────────────
+  // ── Capture current video frame as base64 JPEG (for Python pipeline) ───────────────
+  function captureImageB64(quality = 0.85) {
+    const tmp = document.createElement('canvas');
+    tmp.width  = video.videoWidth  || 640;
+    tmp.height = video.videoHeight || 480;
+    tmp.getContext('2d').drawImage(video, 0, 0);
+    return tmp.toDataURL('image/jpeg', quality).split(',')[1];
+  }
+
+  // ── Core pipeline ──────────────────────────────────────────────────────────────────────────────────
   async function runPipeline(useSynthetic = false) {
     const t0 = performance.now();
     const roi = useSynthetic ? syntheticPalmROI(Math.random() * 20 | 0) : grabGrayROI();
@@ -1335,12 +1344,6 @@ function combinedSimilarity(a, b) {
       fractalResult.heart.dimension, fractalResult.head.dimension,
       fractalResult.life.dimension,  fractalResult.fate.dimension
     ]);
-
-    // Update D bars
-    setBar("bar-heart", "val-heart", fractalResult.heart.dimension);
-    setBar("bar-head",  "val-head",  fractalResult.head.dimension);
-    setBar("bar-life",  "val-life",  fractalResult.life.dimension);
-    setBar("bar-fate",  "val-fate",  fractalResult.fate.dimension);
 
     log("Computing TDA persistence…");
     const diagram = computePersistence(skelResult.intersections);
@@ -1405,14 +1408,18 @@ function combinedSimilarity(a, b) {
       navigator.vibrate?.([60, 40, 60]);
       log(`Enrollment complete — guest ${shortId}`);
       setStep(2);
-      // Best-effort server-side persist (fire-and-forget)
-      const fractalBytes = serializeVector(enrolledVector.fractal.vector); // 24 bytes
-      const palmVectorB64 = btoa(String.fromCharCode(...fractalBytes))
-        .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      // Update fractal D bars once from Python extraction result
+      setBar("bar-heart", "val-heart", enrolledVector.fractal.heart.dimension);
+      setBar("bar-head",  "val-head",  enrolledVector.fractal.head.dimension);
+      setBar("bar-life",  "val-life",  enrolledVector.fractal.life.dimension);
+      setBar("bar-fate",  "val-fate",  enrolledVector.fractal.fate.dimension);
+      // Server-side persist with image_b64 for Python biometric engine
+      const enrollImageB64 = captureImageB64();
+      console.log('[PalmGuard] sending image to Python pipeline');
       fetch(`${API_BASE}/api/palm/enroll`, {
         method: 'POST',
         headers: { 'X-Internal-Token': DEMO_TOKEN, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tenantId: DEMO_TENANT, palmVectorB64, capturedAt: Date.now() })
+        body: JSON.stringify({ tenantId: DEMO_TENANT, image_b64: enrollImageB64, capturedAt: Date.now() })
       }).catch(() => {});
       // In enroll mode redirect back to caller immediately after persist
       if (urlMode === 'enroll' && returnUrl) {
@@ -1443,10 +1450,31 @@ function combinedSimilarity(a, b) {
     try {
       const useSyn = !video.srcObject;
       const live = await runPipeline(useSyn);
-      const sim  = combinedSimilarity(enrolledVector.combined, live.combined);
+      // Update fractal D bars once from this live extraction
+      setBar("bar-heart", "val-heart", live.fractal.heart.dimension);
+      setBar("bar-head",  "val-head",  live.fractal.head.dimension);
+      setBar("bar-life",  "val-life",  live.fractal.life.dimension);
+      setBar("bar-fate",  "val-fate",  live.fractal.fate.dimension);
       const fSim = vectorSimilarity(enrolledVector.fractal.vector, live.fractal.vector);
       const tSim = tdaVectorSimilarity(enrolledVector.tda, live.tda);
-      const match = sim >= SIMILARITY_THRESHOLD;
+      // Call server for Python-engine similarity (primary); fall back to local
+      let sim, match;
+      try {
+        const verifyImageB64 = captureImageB64();
+        console.log('[PalmGuard] sending image to Python pipeline');
+        const apiResp = await fetch(`${API_BASE}/api/palm/verify`, {
+          method: 'POST',
+          headers: { 'X-Internal-Token': DEMO_TOKEN, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tenantId: DEMO_TENANT, image_b64: verifyImageB64, capturedAt: Date.now() })
+        });
+        const apiData = await apiResp.json();
+        sim   = typeof apiData.similarity === 'number' ? apiData.similarity
+                  : combinedSimilarity(enrolledVector.combined, live.combined);
+        match = typeof apiData.match === 'boolean' ? apiData.match : sim >= SIMILARITY_THRESHOLD;
+      } catch (_) {
+        sim   = combinedSimilarity(enrolledVector.combined, live.combined);
+        match = sim >= SIMILARITY_THRESHOLD;
+      }
 
       // Animate the sim metric counter
       const simEl = document.getElementById("m-sim");
