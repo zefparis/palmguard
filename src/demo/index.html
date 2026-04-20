@@ -188,20 +188,12 @@
     .countdown-num { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:1.8rem; font-weight:800; color:var(--cyan); }
     .countdown-label { font-size:0.75rem; color:var(--text); }
 
-    /* ── Skeleton canvas ── */
-    #skeleton-canvas {
+    /* ── Landmark canvas ── */
+    #landmark-canvas {
       width:100%; aspect-ratio:1; border-radius:10px;
-      background:#000; display:block; image-rendering:pixelated;
+      background:#0d1117; display:block;
       box-shadow:0 0 20px rgba(6,182,212,0.08);
     }
-
-    /* ── D bars ── */
-    .line-bars { display:flex; flex-direction:column; gap:0.5rem; }
-    .line-row { display:flex; align-items:center; gap:0.6rem; }
-    .line-label { font-size:0.7rem; color:var(--muted); width:40px; flex-shrink:0; font-family:var(--mono); }
-    .line-bar-bg { flex:1; background:rgba(255,255,255,0.06); border-radius:99px; height:6px; overflow:hidden; }
-    .line-bar-fill { height:100%; border-radius:99px; width:0; transition:width 0.55s cubic-bezier(.34,1.56,.64,1); }
-    .line-val { font-size:0.7rem; font-family:var(--mono); color:var(--text); width:38px; text-align:right; }
 
     /* ── TDA canvas ── */
     #tda-canvas { width:100%; aspect-ratio:1; border-radius:10px; background:var(--surface); display:block; }
@@ -445,31 +437,8 @@
   </div>
 
   <div class="card">
-    <div class="card-title">🦴 Palm Skeleton · Zhang-Suen Thinning</div>
-    <canvas id="skeleton-canvas" width="256" height="256"></canvas>
-    <div class="card-title" style="margin-top:0.75rem;">Fractal D per Line</div>
-    <div class="line-bars">
-      <div class="line-row">
-        <span class="line-label">Heart</span>
-        <div class="line-bar-bg"><div class="line-bar-fill" id="bar-heart"></div></div>
-        <span class="line-val" id="val-heart">—</span>
-      </div>
-      <div class="line-row">
-        <span class="line-label">Head</span>
-        <div class="line-bar-bg"><div class="line-bar-fill" id="bar-head" style="background:var(--cyan)"></div></div>
-        <span class="line-val" id="val-head">—</span>
-      </div>
-      <div class="line-row">
-        <span class="line-label">Life</span>
-        <div class="line-bar-bg"><div class="line-bar-fill" id="bar-life" style="background:var(--green)"></div></div>
-        <span class="line-val" id="val-life">—</span>
-      </div>
-      <div class="line-row">
-        <span class="line-label">Fate</span>
-        <div class="line-bar-bg"><div class="line-bar-fill" id="bar-fate" style="background:var(--amber)"></div></div>
-        <span class="line-val" id="val-fate">—</span>
-      </div>
-    </div>
+    <div class="card-title">🖐 Landmark Overlay · MediaPipe 21-pt</div>
+    <canvas id="landmark-canvas" width="256" height="256"></canvas>
   </div>
 </div>
 
@@ -963,7 +932,7 @@ function combinedSimilarity(a, b) {
   // ── DOM refs ───────────────────────────────────────────────────────────────────────────
   const video         = document.getElementById("webcam");
   const overlayC      = document.getElementById("overlay");
-  const skelC         = document.getElementById("skeleton-canvas");
+  const lmC           = document.getElementById("landmark-canvas");
   const tdaC          = document.getElementById("tda-canvas");
   const camBadge      = document.getElementById("cam-badge");
   const camWrap       = document.getElementById("cam-wrap");
@@ -982,7 +951,7 @@ function combinedSimilarity(a, b) {
   const logBox        = document.getElementById("log-box");
 
   const overlayCtx    = overlayC.getContext("2d");
-  const skelCtx       = skelC.getContext("2d");
+  const lmCtx         = lmC.getContext("2d");
   const tdaCtx        = tdaC.getContext("2d");
 
   // ── JDN (Julian Day Number) ─────────────────────────────────────────────
@@ -1026,11 +995,6 @@ function combinedSimilarity(a, b) {
     el.className = "metric-value" + (cls ? ` ${cls}` : "");
   };
 
-  const setBar = (id, valId, d) => {
-    const pct = ((d - 1) / 1) * 100; // D in [1,2] → [0,100]%
-    document.getElementById(id).style.width = Math.max(0, Math.min(100, pct)) + "%";
-    document.getElementById(valId).textContent = d.toFixed(4);
-  };
 
   // ── Synthetic palm ROI (256×256) for demo without webcam ─────────────────────
   function syntheticPalmROI(seed = 42) {
@@ -1120,36 +1084,40 @@ function combinedSimilarity(a, b) {
     reticle.classList.toggle("hand-ok", detected);
   }
 
-  // ── Skeleton canvas render — D-value colour coding ──────────────────────
-  const dToColor = (d) => {
-    if (d < 1.2) return [59,130,246];   // blue
-    if (d < 1.5) return [6,182,212];    // cyan
-    if (d < 1.7) return [16,185,129];   // green
-    return [245,158,11];                 // gold
-  };
+  // ── Landmark overlay render ──────────────────────────────────────────────
+  const LM_CONNECTIONS = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
+  const LM_TIPS = new Set([4,8,12,16,20]);
 
-  function renderSkeleton(skelResult, lines, dValues = [1.5,1.5,1.5,1.5]) {
-    const idata = skelCtx.createImageData(256, 256);
-    for (const [li, line] of lines.slice(0,4).entries()) {
-      const col = dToColor(dValues[li] ?? 1.5);
-      for (const {x, y} of line.points) {
-        const idx = (y * 256 + x) * 4;
-        idata.data[idx] = col[0]; idata.data[idx+1] = col[1];
-        idata.data[idx+2] = col[2]; idata.data[idx+3] = 255;
+  function renderLandmarks(landmarks) {
+    const W = lmC.width, H = lmC.height;
+    lmCtx.clearRect(0, 0, W, H);
+    lmCtx.fillStyle = '#0d1117';
+    lmCtx.fillRect(0, 0, W, H);
+    if (!landmarks || !landmarks.length) {
+      lmCtx.fillStyle = 'rgba(100,116,139,0.7)';
+      lmCtx.font = '12px monospace';
+      lmCtx.textAlign = 'center';
+      lmCtx.fillText('waiting for hand\u2026', W / 2, H / 2);
+      lmCtx.textAlign = 'left';
+      return;
+    }
+    lmCtx.strokeStyle = 'rgba(6,182,212,0.55)';
+    lmCtx.lineWidth = 1.5;
+    for (const [a, b] of LM_CONNECTIONS) {
+      if (landmarks[a] && landmarks[b]) {
+        lmCtx.beginPath();
+        lmCtx.moveTo(landmarks[a].x * W, landmarks[a].y * H);
+        lmCtx.lineTo(landmarks[b].x * W, landmarks[b].y * H);
+        lmCtx.stroke();
       }
     }
-    // Intersection nodes — glowing 3×3 block
-    for (const {x, y} of skelResult.intersections) {
-      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-        const nx = x+dx, ny = y+dy;
-        if (nx>=0 && nx<256 && ny>=0 && ny<256) {
-          const idx = (ny*256+nx)*4;
-          idata.data[idx]=239; idata.data[idx+1]=68;
-          idata.data[idx+2]=68; idata.data[idx+3]=255;
-        }
-      }
+    for (let i = 0; i < landmarks.length; i++) {
+      const lm = landmarks[i];
+      lmCtx.beginPath();
+      lmCtx.arc(lm.x * W, lm.y * H, LM_TIPS.has(i) ? 4 : 2.5, 0, Math.PI * 2);
+      lmCtx.fillStyle = LM_TIPS.has(i) ? '#f0abfc' : '#06b6d4';
+      lmCtx.fill();
     }
-    skelCtx.putImageData(idata, 0, 0);
   }
 
   // ── TDA diagram render ────────────────────────────────────────────────────────
@@ -1343,11 +1311,7 @@ function combinedSimilarity(a, b) {
     const lineImgs = linesToBinaryImages(skelResult.lines, 256, 256);
     const fractalResult = computePalmVector(lineImgs.heart, lineImgs.head, lineImgs.life, lineImgs.fate);
 
-    // Render skeleton with D-value colour coding (done AFTER fractal to have D)
-    renderSkeleton(skelResult, skelResult.lines, [
-      fractalResult.heart.dimension, fractalResult.head.dimension,
-      fractalResult.life.dimension,  fractalResult.fate.dimension
-    ]);
+    renderLandmarks(lastLandmarks);
 
     log("Computing TDA persistence…");
     const diagram = computePersistence(skelResult.intersections);
@@ -1412,11 +1376,6 @@ function combinedSimilarity(a, b) {
       navigator.vibrate?.([60, 40, 60]);
       log(`Enrollment complete — guest ${shortId}`);
       setStep(2);
-      // Update fractal D bars once from Python extraction result
-      setBar("bar-heart", "val-heart", enrolledVector.fractal.heart.dimension);
-      setBar("bar-head",  "val-head",  enrolledVector.fractal.head.dimension);
-      setBar("bar-life",  "val-life",  enrolledVector.fractal.life.dimension);
-      setBar("bar-fate",  "val-fate",  enrolledVector.fractal.fate.dimension);
       // Server-side persist with image_b64 for Python biometric engine
       const enrollImageB64 = captureImageB64();
       const enrollBody = { tenantId: DEMO_TENANT, image_b64: enrollImageB64, capturedAt: Date.now() };
@@ -1456,11 +1415,6 @@ function combinedSimilarity(a, b) {
     try {
       const useSyn = !video.srcObject;
       const live = await runPipeline(useSyn);
-      // Update fractal D bars once from this live extraction
-      setBar("bar-heart", "val-heart", live.fractal.heart.dimension);
-      setBar("bar-head",  "val-head",  live.fractal.head.dimension);
-      setBar("bar-life",  "val-life",  live.fractal.life.dimension);
-      setBar("bar-fate",  "val-fate",  live.fractal.fate.dimension);
       const fSim = vectorSimilarity(enrolledVector.fractal.vector, live.fractal.vector);
       const tSim = tdaVectorSimilarity(enrolledVector.tda, live.tda);
       // Call server for Python-engine similarity (primary); fall back to local
@@ -1619,16 +1573,7 @@ function combinedSimilarity(a, b) {
           drawLandmarks(lastLandmarks, rect.width || 640, rect.height || 480);
           setHandDetected(!!lastLandmarks, score);
 
-          // No hand: clear skeleton canvas and show waiting state
-          if (!lastLandmarks) {
-            skelCtx.fillStyle = '#000';
-            skelCtx.fillRect(0, 0, skelC.width, skelC.height);
-            skelCtx.fillStyle = 'rgba(100,116,139,0.7)';
-            skelCtx.font = '12px monospace';
-            skelCtx.textAlign = 'center';
-            skelCtx.fillText('waiting for hand\u2026', skelC.width / 2, skelC.height / 2);
-            skelCtx.textAlign = 'left';
-          }
+          renderLandmarks(lastLandmarks);
 
           // Auto-verify on first confirmed hand detection in mode=verify
           if (urlMode === 'verify') {
