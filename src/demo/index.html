@@ -1319,11 +1319,15 @@ function combinedSimilarity(a, b) {
   }
 
   // ── Capture current video frame as base64 JPEG (for Python pipeline) ───────────────
-  function captureImageB64(quality = 0.85) {
+  function captureImageB64(quality = 0.80) {
+    const MAX_W = 320, MAX_H = 240;
+    const sw = video.videoWidth  || 640;
+    const sh = video.videoHeight || 480;
+    const scale = Math.min(MAX_W / sw, MAX_H / sh, 1);
     const tmp = document.createElement('canvas');
-    tmp.width  = video.videoWidth  || 640;
-    tmp.height = video.videoHeight || 480;
-    tmp.getContext('2d').drawImage(video, 0, 0);
+    tmp.width  = Math.round(sw * scale);
+    tmp.height = Math.round(sh * scale);
+    tmp.getContext('2d').drawImage(video, 0, 0, tmp.width, tmp.height);
     return tmp.toDataURL('image/jpeg', quality).split(',')[1];
   }
 

@@ -46,8 +46,8 @@ export function createApp(overrides?: AppDeps): Express {
   const limiter = overrides?.limiter ?? rateLimiter; // singleton for backward compat
 
   const app = express();
-  app.use(express.json({ limit: "64kb" }));
-  app.use(cors({ origin: ALLOWED_ORIGINS, credentials: false }));
+  app.use(cors({ origin: ALLOWED_ORIGINS, credentials: false }));  // MUST be before body parsers
+  app.use(express.json({ limit: "2mb" }));
   app.use("/api/palm", createPalmRoutes({ repo, limiter }));
 
   return app;
