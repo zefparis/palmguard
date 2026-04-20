@@ -74,7 +74,10 @@ async function extractBiometricVector(imageB64: string): Promise<number[]> {
     }
   );
   const data = await res.json() as { success: boolean; vector?: number[]; error?: string };
-  if (!data.success) throw new Error(data.error ?? "BIOMETRIC_FAILED");
+  if (!data.success) {
+    if (data.error === "NO_HAND_DETECTED") throw new Error("NO_HAND_DETECTED");
+    throw new Error(data.error ?? "BIOMETRIC_FAILED");
+  }
   return data.vector!;
 }
 
@@ -183,7 +186,10 @@ export function createPalmRoutes({ repo, limiter }: RouteDeps): Router {
           }
         }
       } catch (err) {
-        if (err instanceof Error && err.message === "PYTHON_ENGINE_UNAVAILABLE") {
+        if (err instanceof Error && err.message === "NO_HAND_DETECTED") {
+          statusCode = 400;
+          body = { success: false, code: "NO_HAND_DETECTED", message: "No hand detected in image — show palm to camera" };
+        } else if (err instanceof Error && err.message === "PYTHON_ENGINE_UNAVAILABLE") {
           statusCode = 503;
           body = { success: false, code: "PYTHON_ENGINE_UNAVAILABLE", message: "Biometric engine not configured — set PALMGUARD_PYTHON_URL" };
         } else if (err instanceof RepositoryError && err.kind === "CONFLICT") {
