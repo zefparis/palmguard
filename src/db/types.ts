@@ -16,6 +16,7 @@ export interface EnrollRecord {
   celestialJdn:      number;
   templateVersion:   string;
   captureConfidence?: number;
+  biometricVector?:  number[];  // Float32[74] from Python biometric engine
 }
 
 export type AuditEventType =

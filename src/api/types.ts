@@ -9,11 +9,13 @@ export interface EnrollRequest {
   tenantId: string;
   /** User identifier within tenant scope. */
   userId: string;
+  /** Base64 JPEG/PNG image of the palm for server-side biometric extraction. */
+  image_b64: string;
   /**
    * Base64url-encoded serialized palm biometric vector (24 bytes).
-   * Must have been computed client-side; raw pixel data never sent.
+   * Legacy field — kept for backward compatibility; optional when image_b64 is provided.
    */
-  palmVectorB64: string;
+  palmVectorB64?: string;
   /** Unix timestamp of capture (ms). Used to derive celestial salt. */
   capturedAt: number;
   /** MediaPipe confidence score [0, 1] of the best frame used. */
@@ -35,7 +37,10 @@ export interface EnrollResponse {
 export interface VerifyRequest {
   tenantId: string;
   userId: string;
-  palmVectorB64: string;
+  /** Base64 JPEG/PNG image of the palm for server-side biometric extraction. */
+  image_b64: string;
+  /** Legacy field — used as fallback when enrollment has no biometricVector. */
+  palmVectorB64?: string;
   capturedAt: number;
   confidence: number;
   deviceId?: string;

@@ -60,6 +60,35 @@ function hashIp(req: Request): string {
   return createHash("sha256").update(ip).digest("hex");
 }
 
+// ─── Python biometric engine helpers ─────────────────────────────────────────
+
+async function extractBiometricVector(imageB64: string): Promise<number[]> {
+  const res = await fetch(
+    `${process.env["PALMGUARD_PYTHON_URL"]}/biometric/extract`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image_b64: imageB64 }),
+    }
+  );
+  const data = await res.json() as { success: boolean; vector?: number[]; error?: string };
+  if (!data.success) throw new Error(data.error ?? "BIOMETRIC_FAILED");
+  return data.vector!;
+}
+
+async function compareBiometricVectors(a: number[], b: number[]): Promise<number> {
+  const res = await fetch(
+    `${process.env["PALMGUARD_PYTHON_URL"]}/biometric/compare`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ vector_a: a, vector_b: b }),
+    }
+  );
+  const data = await res.json() as { similarity: number };
+  return data.similarity;
+}
+
 // ─── Route factory ────────────────────────────────────────────────────────────
 
 export interface RouteDeps {
@@ -86,66 +115,66 @@ export function createPalmRoutes({ repo, limiter }: RouteDeps): Router {
       try {
         const reqBody = req.body as EnrollRequest;
 
-        if (!reqBody.tenantId || !reqBody.palmVectorB64 || !reqBody.capturedAt) {
+        if (!reqBody.tenantId || !reqBody.image_b64 || !reqBody.capturedAt) {
           statusCode = 400;
-          body = { success: false, code: "INVALID_REQUEST", message: "Missing required fields: tenantId, palmVectorB64, capturedAt" };
+          body = { success: false, code: "INVALID_REQUEST", message: "Missing required fields: tenantId, image_b64, capturedAt" };
         } else {
-          const biometricBytes = decodeB64(reqBody.palmVectorB64);
+          // Extract biometric vector from Python engine
+          const vector = await extractBiometricVector(reqBody.image_b64);
+          const biometricBytes = new Uint8Array(
+            createHash("sha256").update(Buffer.from(new Float32Array(vector).buffer)).digest()
+          ).slice(0, 24);
 
-          if (biometricBytes.byteLength !== 24) {
-            statusCode = 400;
-            body = { success: false, code: "INVALID_VECTOR", message: "palmVectorB64 must decode to exactly 24 bytes" };
+          // Demo mode: skip rate-limit entirely
+          const rl = isDemo ? { allowed: true, retryAfterSecs: 0 } : await limiter.checkEnroll(userId);
+          if (!rl.allowed) {
+            statusCode = 429;
+            body = { success: false, code: "RATE_LIMIT_EXCEEDED", message: `Enroll limit reached. Retry after ${rl.retryAfterSecs}s` };
+            res.setHeader("Retry-After", String(rl.retryAfterSecs));
           } else {
-            // Demo mode: skip rate-limit entirely
-            const rl = isDemo ? { allowed: true, retryAfterSecs: 0 } : await limiter.checkEnroll(userId);
-            if (!rl.allowed) {
-              statusCode = 429;
-              body = { success: false, code: "RATE_LIMIT_EXCEEDED", message: `Enroll limit reached. Retry after ${rl.retryAfterSecs}s` };
-              res.setHeader("Retry-After", String(rl.retryAfterSecs));
-            } else {
-              if (!isDemo) await limiter.recordEnroll(userId);
+            if (!isDemo) await limiter.recordEnroll(userId);
 
-              const celestialSalt = deriveCelestialSalt(reqBody.capturedAt);
-              const contentHash   = createHash("sha256").update(biometricBytes).update(celestialSalt.bytes).digest("hex");
-              const { publicKey, privateKey } = await generateKeyPair();
-              const enc      = await encapsulateTemplate(publicKey, biometricBytes, celestialSalt.bytes);
-              const template = buildTemplate(enc, publicKey, contentHash, reqBody.capturedAt, celestialSalt.jdn);
-              const enrollmentId = randomBytes(16).toString("hex");
+            const celestialSalt = deriveCelestialSalt(reqBody.capturedAt);
+            const contentHash   = createHash("sha256").update(biometricBytes).update(celestialSalt.bytes).digest("hex");
+            const { publicKey, privateKey } = await generateKeyPair();
+            const enc      = await encapsulateTemplate(publicKey, biometricBytes, celestialSalt.bytes);
+            const template = buildTemplate(enc, publicKey, contentHash, reqBody.capturedAt, celestialSalt.jdn);
+            const enrollmentId = randomBytes(16).toString("hex");
 
-              // Vault: encrypt private key with HKDF-derived KEK
-              const hcsSecret  = process.env["HCS_TOKEN_SECRET"] ?? "dev-secret";
-              const kek        = await deriveKEK(hcsSecret, userId);
-              const vaultEntry = await encryptPrivateKey(kek, privateKey);
-              void serializeVaultEntry(vaultEntry); // ensure the vault blob is always computable
+            // Vault: encrypt private key with HKDF-derived KEK
+            const hcsSecret  = process.env["HCS_TOKEN_SECRET"] ?? "dev-secret";
+            const kek        = await deriveKEK(hcsSecret, userId);
+            const vaultEntry = await encryptPrivateKey(kek, privateKey);
+            void serializeVaultEntry(vaultEntry); // ensure the vault blob is always computable
 
-              // Demo mode: silently replace any prior enrollment (avoids 409 CONFLICT)
-              if (isDemo) await repo.deleteEnrollment(reqBody.tenantId, userId).catch(() => {});
+            // Demo mode: silently replace any prior enrollment (avoids 409 CONFLICT)
+            if (isDemo) await repo.deleteEnrollment(reqBody.tenantId, userId).catch(() => {});
 
-              // Persist to Supabase
-              await repo.enroll({
-                tenantId:           reqBody.tenantId,
-                userId,
-                contentHash,
-                enrollmentId,
-                templateCiphertext: enc.ciphertext,
-                publicKey,
-                kemPrivkeyEnc:      vaultEntry.encryptedKey,
-                kekIv:              vaultEntry.iv,
-                capturedAt:         reqBody.capturedAt,
-                celestialJdn:       celestialSalt.jdn,
-                templateVersion:    "1.0",
-              });
+            // Persist to Supabase
+            await repo.enroll({
+              tenantId:           reqBody.tenantId,
+              userId,
+              contentHash,
+              enrollmentId,
+              templateCiphertext: enc.ciphertext,
+              publicKey,
+              kemPrivkeyEnc:      vaultEntry.encryptedKey,
+              kekIv:              vaultEntry.iv,
+              capturedAt:         reqBody.capturedAt,
+              celestialJdn:       celestialSalt.jdn,
+              templateVersion:    "1.0",
+              biometricVector:    vector,
+            });
 
-              await repo.appendAuditLog({
-                tenantId:  reqBody.tenantId,
-                userId,
-                eventType: "ENROLL",
-                ipHash:    hashIp(req),
-                auditToken: enrollmentId,
-              });
+            await repo.appendAuditLog({
+              tenantId:  reqBody.tenantId,
+              userId,
+              eventType: "ENROLL",
+              ipHash:    hashIp(req),
+              auditToken: enrollmentId,
+            });
 
-              body = { success: true, enrollmentId, enrolledAt: reqBody.capturedAt, templateVersion: "1.0" };
-            }
+            body = { success: true, enrollmentId, enrolledAt: reqBody.capturedAt, templateVersion: "1.0" };
           }
         }
       } catch (err) {
@@ -178,58 +207,58 @@ export function createPalmRoutes({ repo, limiter }: RouteDeps): Router {
       try {
         const reqBody = req.body as VerifyRequest;
 
-        if (!reqBody.tenantId || !reqBody.palmVectorB64 || !reqBody.capturedAt) {
+        if (!reqBody.tenantId || !reqBody.image_b64 || !reqBody.capturedAt) {
           statusCode = 400;
           body = { success: false, code: "INVALID_REQUEST", message: "Missing required fields" };
         } else {
-          const probeBytes = decodeB64(reqBody.palmVectorB64);
-
-          if (probeBytes.byteLength !== 24) {
-            statusCode = 400;
-            body = { success: false, code: "INVALID_VECTOR", message: "palmVectorB64 must decode to exactly 24 bytes" };
+          const rl = await limiter.checkVerify(userId);
+          if (!rl.allowed) {
+            statusCode = 429;
+            body = { success: false, code: "RATE_LIMIT_EXCEEDED", message: `Verify limit reached. Retry after ${rl.retryAfterSecs}s` };
+            res.setHeader("Retry-After", String(rl.retryAfterSecs));
           } else {
-            const rl = await limiter.checkVerify(userId);
-            if (!rl.allowed) {
-              statusCode = 429;
-              body = { success: false, code: "RATE_LIMIT_EXCEEDED", message: `Verify limit reached. Retry after ${rl.retryAfterSecs}s` };
-              res.setHeader("Retry-After", String(rl.retryAfterSecs));
+            await limiter.recordVerify(userId);
+
+            const enrollment = await repo.findEnrollment(reqBody.tenantId, userId);
+
+            let similarity: number;
+            let match: boolean;
+
+            if (!enrollment) {
+              // No enrollment found — deterministic rejection (avoids user enumeration via timing)
+              similarity = 0;
+              match = false;
+            } else if (enrollment.biometricVector) {
+              // Python engine comparison path
+              const liveVector = await extractBiometricVector(reqBody.image_b64);
+              similarity = await compareBiometricVectors(enrollment.biometricVector, liveVector);
+              match      = similarity >= SIMILARITY_THRESHOLD;
             } else {
-              await limiter.recordVerify(userId);
-
-              const enrollment = await repo.findEnrollment(reqBody.tenantId, userId);
-
-              let similarity: number;
-              let match: boolean;
-
-              if (!enrollment) {
-                // No enrollment found — deterministic rejection (avoids user enumeration via timing)
-                similarity = 0;
-                match = false;
-              } else {
-                const probeVector    = deserializeVector(probeBytes);
-                const enrolledVector = deserializeVector(enrollment.templateCiphertext.slice(0, 24));
-                similarity = vectorSimilarity(probeVector, enrolledVector);
-                match      = similarity >= SIMILARITY_THRESHOLD;
-              }
-
-              const auditToken = createHash("sha256")
-                .update(randomBytes(16))
-                .update(hashIp(req))
-                .digest("hex")
-                .slice(0, 32);
-
-              await repo.appendAuditLog({
-                tenantId:  reqBody.tenantId,
-                userId,
-                eventType: match ? "VERIFY_MATCH" : "VERIFY_NO_MATCH",
-                ipHash:    hashIp(req),
-                auditToken,
-                metadata:  { similarity },
-              });
-
-              const processingMs = Date.now() - start;
-              body = { match, similarity, processingMs, auditToken };
+              // Legacy fallback: local vector deserialization
+              const probeBytes     = decodeB64(reqBody.palmVectorB64 ?? "");
+              const probeVector    = deserializeVector(probeBytes);
+              const enrolledVector = deserializeVector(enrollment.templateCiphertext.slice(0, 24));
+              similarity = vectorSimilarity(probeVector, enrolledVector);
+              match      = similarity >= SIMILARITY_THRESHOLD;
             }
+
+            const auditToken = createHash("sha256")
+              .update(randomBytes(16))
+              .update(hashIp(req))
+              .digest("hex")
+              .slice(0, 32);
+
+            await repo.appendAuditLog({
+              tenantId:  reqBody.tenantId,
+              userId,
+              eventType: match ? "VERIFY_MATCH" : "VERIFY_NO_MATCH",
+              ipHash:    hashIp(req),
+              auditToken,
+              metadata:  { similarity },
+            });
+
+            const processingMs = Date.now() - start;
+            body = { match, similarity, processingMs, auditToken };
           }
         }
       } catch (err) {
