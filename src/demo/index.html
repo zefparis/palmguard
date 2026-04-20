@@ -9,7 +9,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js" crossorigin="anonymous"></script>
+  <script type="module">
+    import { FilesetResolver, HandLandmarker }
+      from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.mjs";
+    window.FilesetResolver = FilesetResolver;
+    window.HandLandmarker = HandLandmarker;
+    window._mediapipeReady = true;
+  </script>
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1529,8 +1535,15 @@ function combinedSimilarity(a, b) {
     log("Camera stream started");
 
     // ── MediaPipe tasks-vision HandLandmarker ──
+    // Wait for the <script type="module"> in <head> to assign globals
+    await new Promise(resolve => {
+      if (window._mediapipeReady) { resolve(); return; }
+      const t = setInterval(() => {
+        if (window._mediapipeReady) { clearInterval(t); resolve(); }
+      }, 50);
+    });
     if (typeof HandLandmarker === "undefined" || typeof FilesetResolver === "undefined") {
-      const msg = "MediaPipe tasks-vision not loaded — vision_bundle.js CDN script failed.";
+      const msg = "MediaPipe tasks-vision not loaded — vision_bundle.mjs CDN import failed.";
       console.error("[PalmGuard]", msg);
       showError(msg);
       setStatus("Camera live — MediaPipe failed to load", "live");
