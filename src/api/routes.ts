@@ -213,8 +213,10 @@ export function createPalmRoutes({ repo, limiter }: RouteDeps): Router {
     "/verify",
     requireAuth,
     async (req: Request, res: Response<VerifyResponse | ApiError>) => {
-      const start  = res.locals["startMs"] as number ?? Date.now();
-      const userId = res.locals["userId"]  as string;
+      const start    = res.locals["startMs"]  as number ?? Date.now();
+      const userId   = res.locals["userId"]   as string;
+      const authMode = res.locals["authMode"] as string;
+      const isDemo   = authMode === "demo";
       let statusCode = 200;
       let body: VerifyResponse | ApiError;
 
@@ -225,13 +227,13 @@ export function createPalmRoutes({ repo, limiter }: RouteDeps): Router {
           statusCode = 400;
           body = { success: false, code: "INVALID_REQUEST", message: "Missing required fields" };
         } else {
-          const rl = await limiter.checkVerify(userId);
+          const rl = isDemo ? { allowed: true, retryAfterSecs: 0 } : await limiter.checkVerify(userId);
           if (!rl.allowed) {
             statusCode = 429;
             body = { success: false, code: "RATE_LIMIT_EXCEEDED", message: `Verify limit reached. Retry after ${rl.retryAfterSecs}s` };
             res.setHeader("Retry-After", String(rl.retryAfterSecs));
           } else {
-            await limiter.recordVerify(userId);
+            if (!isDemo) await limiter.recordVerify(userId);
 
             const enrollment = await repo.findEnrollment(reqBody.tenantId, userId);
 
