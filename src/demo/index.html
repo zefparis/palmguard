@@ -1419,11 +1419,13 @@ function combinedSimilarity(a, b) {
       setBar("bar-fate",  "val-fate",  enrolledVector.fractal.fate.dimension);
       // Server-side persist with image_b64 for Python biometric engine
       const enrollImageB64 = captureImageB64();
+      const enrollBody = { tenantId: DEMO_TENANT, image_b64: enrollImageB64, capturedAt: Date.now() };
       console.log('[PalmGuard] sending image to Python pipeline');
+      console.log('[PalmGuard] enroll request body keys:', Object.keys(enrollBody));
       fetch(`${API_BASE}/api/palm/enroll`, {
         method: 'POST',
         headers: { 'X-Internal-Token': DEMO_TOKEN, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tenantId: DEMO_TENANT, image_b64: enrollImageB64, capturedAt: Date.now() })
+        body: JSON.stringify(enrollBody)
       }).catch(() => {});
       // In enroll mode redirect back to caller immediately after persist
       if (urlMode === 'enroll' && returnUrl) {
