@@ -37,7 +37,7 @@ import type {
   ApiError,
 } from "./types.js";
 
-export const SIMILARITY_THRESHOLD = 0.90;
+export const SIMILARITY_THRESHOLD = 0.88;
 const MIN_LATENCY_MS = 150;
 const JITTER_MAX_MS  = 50;
 
