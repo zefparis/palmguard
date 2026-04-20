@@ -17,6 +17,7 @@ export interface EnrollRecord {
   templateVersion:   string;
   captureConfidence?: number;
   biometricVector?:  number[];  // Float32[74] from Python biometric engine
+  vectorVersion?:    string;    // 'python-v1' for Python pipeline enrollments
 }
 
 export type AuditEventType =

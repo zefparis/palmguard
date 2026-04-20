@@ -24,6 +24,7 @@ export interface PalmGuardConfig {
   port: number;
   rateLimiterMode: RateLimiterMode;
   nodeEnv: string;
+  palmguardPythonUrl: string | null;
 }
 
 /**
@@ -43,7 +44,9 @@ export function buildConfig(): PalmGuardConfig {
   const rateLimiterMode = (optionalEnv("RATE_LIMITER_MODE", "memory")) as RateLimiterMode;
   const port = parseInt(optionalEnv("PORT", "4010"), 10);
 
-  return { supabaseUrl, supabaseServiceKey, hcsTokenSecret, port, rateLimiterMode, nodeEnv };
+  const palmguardPythonUrl = process.env["PALMGUARD_PYTHON_URL"] ?? null;
+
+  return { supabaseUrl, supabaseServiceKey, hcsTokenSecret, port, rateLimiterMode, nodeEnv, palmguardPythonUrl };
 }
 
 // Singleton used by production paths. Tests can call buildConfig() directly.
@@ -56,7 +59,8 @@ export function logStartup(cfg: PalmGuardConfig): void {
     SUPABASE_SERVICE_ROLE_KEY: cfg.supabaseServiceKey ? "set" : "absent",
     HCS_TOKEN_SECRET:          cfg.hcsTokenSecret !== "dev-secret-change-me" ? "set" : "DEFAULT (dev)",
     PORT:             cfg.port,
-    RATE_LIMITER_MODE: cfg.rateLimiterMode,
-    NODE_ENV:          cfg.nodeEnv,
+    RATE_LIMITER_MODE:      cfg.rateLimiterMode,
+    NODE_ENV:               cfg.nodeEnv,
+    PALMGUARD_PYTHON_URL:   cfg.palmguardPythonUrl ? "set" : "absent",
   });
 }

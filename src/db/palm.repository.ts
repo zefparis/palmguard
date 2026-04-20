@@ -128,6 +128,7 @@ class SupabaseRepository implements PalmRepository {
       capture_confidence:  record.captureConfidence ?? 1.0,
       template_version:    record.templateVersion ?? '1.0',
       biometric_vector:    record.biometricVector ?? null,
+      vector_version:      record.vectorVersion ?? null,
       is_active:           true,
     });
 
@@ -171,6 +172,7 @@ class SupabaseRepository implements PalmRepository {
       celestialJdn:       data.julian_day_number    as number,
       templateVersion:    data.template_version     as string,
       ...(data.biometric_vector != null ? { biometricVector: data.biometric_vector as number[] } : {}),
+      ...(data.vector_version    != null ? { vectorVersion:   data.vector_version    as string  } : {}),
     };
   }
 

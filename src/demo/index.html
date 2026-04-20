@@ -1697,7 +1697,7 @@ function combinedSimilarity(a, b) {
   function saveEnrollmentLocally(e, enrolledAt) {
     try {
       localStorage.setItem(LS_ENROLLED, JSON.stringify({
-        version: 'v2',
+        version: 'v2-python',
         combined:             Array.from(e.combined),
         fractalVector:        Array.from(e.fractal.vector),
         fractalFeatureVector: Array.from(e.fractal.featureVector ?? e.fractal.vector),
@@ -1719,7 +1719,7 @@ function combinedSimilarity(a, b) {
       if (!raw) return null;
       const d = JSON.parse(raw);
       // Version guard: reject old-format enrollments (wrong vector dim)
-      if (d.version !== 'v2' || !d.combined || d.combined.length !== 74) return null;
+      if (d.version !== 'v2-python' || !d.combined || d.combined.length !== 74) return null;
       return {
         combined: Float32Array.from(d.combined),
         fractal: {
@@ -1770,7 +1770,25 @@ function combinedSimilarity(a, b) {
 
   // ── Initialise on page load ────────────────────────────────────────────────
   (async () => {
-    // 1. Try localStorage first (instant, no network)
+    // 1. Detect stale enrollment from old JS pipeline — clear and prompt re-enroll
+    const rawStored = localStorage.getItem(LS_ENROLLED);
+    if (rawStored) {
+      try {
+        const parsed = JSON.parse(rawStored);
+        if (parsed.version !== 'v2-python') {
+          localStorage.removeItem(LS_ENROLLED);
+          const banner = document.getElementById('returning-banner');
+          const msgEl  = document.getElementById('returning-msg');
+          const atEl   = document.getElementById('returning-enrolled-at');
+          if (banner) banner.classList.add('visible');
+          if (msgEl)  msgEl.textContent  = '⚠️ New biometric engine — please re-enroll once';
+          if (atEl)   atEl.textContent   = '';
+          log('Old enrollment cleared — Python pipeline requires re-enrollment');
+        }
+      } catch (_) { localStorage.removeItem(LS_ENROLLED); }
+    }
+
+    // 2. Try localStorage first (instant, no network)
     const localEnroll = loadEnrollmentLocally();
     if (localEnroll) {
       enrolledVector = localEnroll;

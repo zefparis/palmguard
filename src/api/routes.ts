@@ -63,8 +63,10 @@ function hashIp(req: Request): string {
 // ─── Python biometric engine helpers ─────────────────────────────────────────
 
 async function extractBiometricVector(imageB64: string): Promise<number[]> {
+  const pythonUrl = process.env["PALMGUARD_PYTHON_URL"];
+  if (!pythonUrl) throw new Error("PYTHON_ENGINE_UNAVAILABLE");
   const res = await fetch(
-    `${process.env["PALMGUARD_PYTHON_URL"]}/biometric/extract`,
+    `${pythonUrl}/biometric/extract`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -77,8 +79,10 @@ async function extractBiometricVector(imageB64: string): Promise<number[]> {
 }
 
 async function compareBiometricVectors(a: number[], b: number[]): Promise<number> {
+  const pythonUrl = process.env["PALMGUARD_PYTHON_URL"];
+  if (!pythonUrl) throw new Error("PYTHON_ENGINE_UNAVAILABLE");
   const res = await fetch(
-    `${process.env["PALMGUARD_PYTHON_URL"]}/biometric/compare`,
+    `${pythonUrl}/biometric/compare`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -164,6 +168,7 @@ export function createPalmRoutes({ repo, limiter }: RouteDeps): Router {
               celestialJdn:       celestialSalt.jdn,
               templateVersion:    "1.0",
               biometricVector:    vector,
+              vectorVersion:      "python-v1",
             });
 
             await repo.appendAuditLog({
@@ -178,7 +183,10 @@ export function createPalmRoutes({ repo, limiter }: RouteDeps): Router {
           }
         }
       } catch (err) {
-        if (err instanceof RepositoryError && err.kind === "CONFLICT") {
+        if (err instanceof Error && err.message === "PYTHON_ENGINE_UNAVAILABLE") {
+          statusCode = 503;
+          body = { success: false, code: "PYTHON_ENGINE_UNAVAILABLE", message: "Biometric engine not configured — set PALMGUARD_PYTHON_URL" };
+        } else if (err instanceof RepositoryError && err.kind === "CONFLICT") {
           statusCode = 409;
           body = { success: false, code: "ALREADY_ENROLLED", message: "User already enrolled. DELETE /enroll/:userId first" };
         } else {
@@ -228,43 +236,47 @@ export function createPalmRoutes({ repo, limiter }: RouteDeps): Router {
               // No enrollment found — deterministic rejection (avoids user enumeration via timing)
               similarity = 0;
               match = false;
-            } else if (enrollment.biometricVector) {
+            } else if (enrollment.vectorVersion !== "python-v1") {
+              // Enrollment from legacy pipeline — must re-enroll with Python engine
+              statusCode = 409;
+              body = { success: false, code: "ENROLLMENT_OUTDATED", message: "Please re-enroll with new Python pipeline" };
+            } else {
               // Python engine comparison path
               const liveVector = await extractBiometricVector(reqBody.image_b64);
-              similarity = await compareBiometricVectors(enrollment.biometricVector, liveVector);
-              match      = similarity >= SIMILARITY_THRESHOLD;
-            } else {
-              // Legacy fallback: local vector deserialization
-              const probeBytes     = decodeB64(reqBody.palmVectorB64 ?? "");
-              const probeVector    = deserializeVector(probeBytes);
-              const enrolledVector = deserializeVector(enrollment.templateCiphertext.slice(0, 24));
-              similarity = vectorSimilarity(probeVector, enrolledVector);
+              similarity = await compareBiometricVectors(enrollment.biometricVector!, liveVector);
               match      = similarity >= SIMILARITY_THRESHOLD;
             }
 
-            const auditToken = createHash("sha256")
-              .update(randomBytes(16))
-              .update(hashIp(req))
-              .digest("hex")
-              .slice(0, 32);
+            if (statusCode !== 409) {
+              const auditToken = createHash("sha256")
+                .update(randomBytes(16))
+                .update(hashIp(req))
+                .digest("hex")
+                .slice(0, 32);
 
-            await repo.appendAuditLog({
-              tenantId:  reqBody.tenantId,
-              userId,
-              eventType: match ? "VERIFY_MATCH" : "VERIFY_NO_MATCH",
-              ipHash:    hashIp(req),
-              auditToken,
-              metadata:  { similarity },
-            });
+              await repo.appendAuditLog({
+                tenantId:  reqBody.tenantId,
+                userId,
+                eventType: match! ? "VERIFY_MATCH" : "VERIFY_NO_MATCH",
+                ipHash:    hashIp(req),
+                auditToken,
+                metadata:  { similarity: similarity! },
+              });
 
-            const processingMs = Date.now() - start;
-            body = { match, similarity, processingMs, auditToken };
+              const processingMs = Date.now() - start;
+              body = { match: match!, similarity: similarity!, processingMs, auditToken };
+            }
           }
         }
       } catch (err) {
-        console.error("[palmguard] verify error:", err instanceof Error ? err.message : err);
-        statusCode = 500;
-        body = { success: false, code: "INTERNAL_ERROR", message: "Verification failed" };
+        if (err instanceof Error && err.message === "PYTHON_ENGINE_UNAVAILABLE") {
+          statusCode = 503;
+          body = { success: false, code: "PYTHON_ENGINE_UNAVAILABLE", message: "Biometric engine not configured — set PALMGUARD_PYTHON_URL" };
+        } else {
+          console.error("[palmguard] verify error:", err instanceof Error ? err.message : err);
+          statusCode = 500;
+          body = { success: false, code: "INTERNAL_ERROR", message: "Verification failed" };
+        }
       }
 
       await timingFloor(start);

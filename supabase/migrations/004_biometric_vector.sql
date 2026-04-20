@@ -3,3 +3,6 @@
 
 ALTER TABLE palm_enrollments
   ADD COLUMN IF NOT EXISTS biometric_vector JSONB;
+
+ALTER TABLE palm_enrollments
+  ADD COLUMN IF NOT EXISTS vector_version TEXT DEFAULT 'v1';
