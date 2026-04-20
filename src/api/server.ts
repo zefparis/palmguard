@@ -47,7 +47,8 @@ export function createApp(overrides?: AppDeps): Express {
 
   const app = express();
   app.use(cors({ origin: ALLOWED_ORIGINS, credentials: false }));  // MUST be before body parsers
-  app.use(express.json({ limit: "2mb" }));
+  app.use(express.json({ limit: "10mb" }));
+  app.use(express.urlencoded({ limit: "10mb", extended: true }));
   app.use("/api/palm", createPalmRoutes({ repo, limiter }));
 
   return app;
